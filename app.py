@@ -9,6 +9,7 @@ from flask_marshmallow import Marshmallow
 from flask_migrate import Migrate
 from flask_uuid import FlaskUUID
 from marshmallow_enum import EnumField
+from marshmallow_sqlalchemy import auto_field
 import uuid
 
 from sqlalchemy.dialects.postgresql import UUID
@@ -78,8 +79,9 @@ class Gender(db.Model):
 class RecordingSchema(ma.SQLAlchemySchema):
     class Meta:
         model = Recording
-        fields = ("name", "category_id", "privacy", "age_id", "gender_id", "location", "occupation", "parent_id")
+        fields = ("id", "name", "category_id", "privacy", "age_id", "gender_id", "location", "occupation", "parent_id")
 
+    id = auto_field(dump_only=True)
     privacy = EnumField(Privacy)
 
 recording_schema = RecordingSchema()
