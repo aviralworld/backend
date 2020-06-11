@@ -8,6 +8,7 @@ from flask_dotenv import DotEnv
 from flask_marshmallow import Marshmallow
 from flask_migrate import Migrate
 from flask_uuid import FlaskUUID
+from marshmallow_enum import EnumField
 import uuid
 
 from sqlalchemy.dialects.postgresql import UUID
@@ -79,6 +80,8 @@ class RecordingSchema(ma.SQLAlchemySchema):
         model = Recording
         fields = ("name", "category_id", "privacy", "age_id", "gender_id", "location", "occupation", "parent_id")
 
+    privacy = EnumField(Privacy)
+
 recording_schema = RecordingSchema()
 
 class NewRecordingResource(Resource):
@@ -109,7 +112,12 @@ api.add_resource(NewRecordingResource, "/recordings/")
 
 class RecordingResource(Resource):
     def get(self, id):
-        pass
+        recording = db.session.query(Recording).get(id)
+
+        if recording:
+            return recording_schema.dump(recording), 200
+        else:
+            return None, 404
 
 api.add_resource(RecordingResource, "/recordings/<uuid:id>/")
 
