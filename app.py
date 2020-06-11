@@ -83,6 +83,7 @@ class RecordingSchema(ma.SQLAlchemySchema):
     privacy = EnumField(Privacy)
 
 recording_schema = RecordingSchema()
+recordings_schema = RecordingSchema(many=True)
 
 class NewRecordingResource(Resource):
     def post(self):
@@ -116,10 +117,21 @@ class RecordingResource(Resource):
 
         if recording:
             return recording_schema.dump(recording), 200
-        else:
-            return None, 404
+
+        return None, 404
 
 api.add_resource(RecordingResource, "/recordings/<uuid:id>/")
+
+class RecordingChildrenResource(Resource):
+    def get(self, parent_id):
+        recordings = db.session.query(Recording).filter(Recording.parent_id == parent_id).all()
+
+        if len(recordings) > 0:
+            return recordings_schema.dump(recordings), 200
+
+        return None, 404
+
+api.add_resource(RecordingChildrenResource, "/recordings/<uuid:parent_id>/children/")
 
 if __name__ == "__main__":
     app.run(debug=True)
