@@ -14,7 +14,7 @@ serde_derive = "1.0.110"
 unicode-normalization = "0.1.12"
 sqlx = { version = "0.3.5", default-features = false, features = [ "postgres", "runtime-tokio", "time", "uuid" ] }
 time = "0.2.16"
-thiserror = "1.0.19"
+thiserror = "1.0.20"
 warp = "0.2.3"
 tokio = { version = "0.2.21", features = [ "macros" ] }
 futures = "0.3.5"

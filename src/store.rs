@@ -6,10 +6,9 @@ use futures::future::{BoxFuture, FutureExt};
 use rusoto_s3::{PutObjectRequest, S3Client, S3, StreamingBody};
 use warp::filters::multipart::Part;
 
-pub trait Store: Send + Sync {
-    /// The type of error.
-    type Error;
+use crate::errors::StoreError;
 
+pub trait Store: Send + Sync {
     /// The type of successful result.
     type Output;
 
@@ -17,7 +16,7 @@ pub trait Store: Send + Sync {
     type Raw;
 
     /// Saves the given data under the given key.
-    fn save(&self, key: impl AsRef<str>, raw: Self::Raw) -> BoxFuture<Result<Self::Output, Self::Error>>;
+    fn save(&self, key: impl AsRef<str>, raw: Self::Raw) -> BoxFuture<Result<Self::Output, StoreError>>;
 }
 
 /// A store that saves its data to S3.
@@ -53,11 +52,10 @@ impl S3Store {
 }
 
 impl Store for S3Store {
-    type Error = ();
     type Output = ();
     type Raw = Part;
 
-    fn save(&self, key: impl AsRef<str>, raw: Part) -> BoxFuture<Result<(), ()>> {
+    fn save(&self, key: impl AsRef<str>, raw: Part) -> BoxFuture<Result<(), StoreError>> {
         let parsed = self.parse_raw_into_body(raw);
 
         match parsed {
@@ -75,10 +73,10 @@ impl Store for S3Store {
 
                 self.client.put_object(request).map(|r| match r {
                     Ok(_) => Ok(()),
-                    Err(_) => Err(()),
+                    Err(x) => Err(StoreError::UploadError { source: x }),
                 }).boxed()
             },
-            Err(_) => futures::future::err(()).boxed(),
+            Err(_) => futures::future::err(StoreError::ContentParsingError).boxed(),
         }
     }
 }

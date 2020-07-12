@@ -26,9 +26,9 @@ use crate::store::Store;
 /// The maximum form data size to accept. This should be enforced by the HTTP gateway, so on the Rust side it’s set to an unreasonably large number.
 const MAX_CONTENT_LENGTH: u64 = 2 * 1024 * 1024 * 1024;
 
-pub fn make_upload_route<'a, E: 'a, O: 'a>(
+pub fn make_upload_route<'a, O: 'a>(
     logger: Arc<Logger>,
-    store: Arc<impl Store<Error = E, Output = O, Raw = Part> + 'a>,
+    store: Arc<impl Store<Output = O, Raw = Part> + 'a>,
 ) -> impl warp::Filter<Extract = (impl Reply,), Error = Infallible> + Clone + 'a {
     let store = store.clone();
     let logger = logger.clone();
@@ -56,9 +56,9 @@ pub fn make_upload_route<'a, E: 'a, O: 'a>(
         .recover(format_rejection)
 }
 
-async fn process_upload<E, O>(
+async fn process_upload<O>(
     logger: Arc<Logger>,
-    store: Arc<impl Store<Error = E, Output = O, Raw = Part>>,
+    store: Arc<impl Store<Output = O, Raw = Part>>,
     content: FormData,
 ) -> Result<WithStatus<Json>, reject::Rejection> {
     let mut parts = collect_parts(content).await?;
@@ -75,7 +75,10 @@ async fn process_upload<E, O>(
         debug!(logger, "generated key");
 
         store.save(&key_as_str, upload.audio).await
-            .map_err(|_| reject::custom(StorageError))?;
+            .map_err(|x| {
+                error!(logger, "Failed to save"; "error" => format!("{:?}", x));
+                reject::custom(StorageError)
+            })?;
 
         debug!(logger, "saved object");
 
