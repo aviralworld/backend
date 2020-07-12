@@ -1,13 +1,14 @@
 use std::error::Error;
 use std::sync::Arc;
 
-use dotenv;
 use slog::Drain;
 use slog_async;
 use slog_json;
 use std::env;
 use std::sync::Mutex;
 
+use dotenv;
+use pretty_env_logger;
 use rusoto_core::request::HttpClient;
 use rusoto_core::Region;
 use rusoto_credential::StaticProvider;
@@ -20,8 +21,6 @@ use backend::store::S3Store;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     dotenv::dotenv().ok();
-
-    let logger = Arc::new(initialize_logger());
 
     let access_key = get_variable("S3_ACCESS_KEY");
     let secret_access_key = get_variable("S3_SECRET_ACCESS_KEY");
@@ -43,6 +42,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
     ));
 
     let store = S3Store::new(client, acl, bucket, cache_control, content_type);
+
+    let enable_warp_logging = get_variable("BACKEND_ENABLE_WARP_LOGGING");
+
+    if enable_warp_logging == "1" {
+        pretty_env_logger::init();
+    }
+
+    let logger = Arc::new(initialize_logger());
 
     let routes = make_upload_route(logger, Arc::new(store));
     warp::serve(routes).run(([127, 0, 0, 1], 3030)).await;
