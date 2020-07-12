@@ -22,7 +22,9 @@ use crate::store::Store;
 // create, delete, update, retrieve, count
 
 // create: use warp::filters::body::stream
-// TODO limit should be enforced by HTTP gateway
+
+/// The maximum form data size to accept. This should be enforced by the HTTP gateway, so on the Rust side it’s set to an unreasonably large number.
+const MAX_CONTENT_LENGTH: u64 = 2 * 1024 * 1024 * 1024;
 
 pub fn make_upload_route<'a, E: 'a, O: 'a>(
     logger: Arc<Logger>,
@@ -35,7 +37,7 @@ pub fn make_upload_route<'a, E: 'a, O: 'a>(
     // doesn't support that yet
     warp::path("recordings")
         .and(warp::post())
-        .and(form())
+        .and(form().max_length(MAX_CONTENT_LENGTH))
         .and_then(
             move |content: FormData| -> BoxFuture<Result<WithStatus<Json>, reject::Rejection>> {
                 debug!(logger, "recording submitted");
