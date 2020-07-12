@@ -44,7 +44,6 @@ pub fn make_upload_route<'a, O: 'a>(
                 let store = store.clone();
                 let logger = logger.clone();
 
-                // XXX cannot return value referencing local variable `logger`
                 process_upload(
                     logger.clone(),
                     store,
