@@ -16,6 +16,7 @@ use warp::reject;
 use warp::reply::{json, with_status, Json, Reply, WithStatus};
 use warp::Filter;
 
+use crate::errors::{BackendError, StoreError};
 use crate::queries::retrieval;
 use crate::store::Store;
 
@@ -31,7 +32,8 @@ pub fn make_upload_route<'a, O: 'a>(
     store: Arc<impl Store<Output = O, Raw = Part> + 'a>,
 ) -> impl warp::Filter<Extract = (impl Reply,), Error = Infallible> + Clone + 'a {
     let store = store.clone();
-    let logger = logger.clone();
+    let logger1 = logger.clone();
+    let logger2 = logger.clone();
 
     // TODO this should stream the body from the request, but warp
     // doesn't support that yet
@@ -40,19 +42,17 @@ pub fn make_upload_route<'a, O: 'a>(
         .and(form().max_length(MAX_CONTENT_LENGTH))
         .and_then(
             move |content: FormData| -> BoxFuture<Result<WithStatus<Json>, reject::Rejection>> {
-                debug!(logger, "recording submitted");
-                let store = store.clone();
-                let logger = logger.clone();
+                debug!(logger1, "recording submitted");
 
                 process_upload(
-                    logger.clone(),
-                    store,
+                    logger1.clone(),
+                    store.clone(),
                     content,
                 )
                 .boxed()
             },
         )
-        .recover(format_rejection)
+        .recover(move |r| format_rejection(logger2.clone(), r))
 }
 
 async fn process_upload<O>(
@@ -76,7 +76,7 @@ async fn process_upload<O>(
         store.save(key_as_str, upload.audio).await
             .map_err(|x| {
                 error!(logger, "Failed to save"; "error" => format!("{:?}", x));
-                reject::custom(StorageError)
+                x
             })?;
 
         debug!(logger, "saved object");
@@ -89,17 +89,21 @@ async fn process_upload<O>(
     }
 }
 
-async fn format_rejection(rej: reject::Rejection) -> Result<WithStatus<Json>, Infallible> {
+async fn format_rejection(logger: Arc<Logger>, rej: reject::Rejection) -> Result<WithStatus<Json>, Infallible> {
     let mut code = StatusCode::INTERNAL_SERVER_ERROR;
 
-    println!("Rejection: {:?}", rej);
+    if let Some(e) = rej.find::<BackendError>() {
+        error!(logger, "Backend error"; "error" => format!("{:?}", e));
 
-    if rej.find::<BadRequestError>().is_some() {
-        code = StatusCode::BAD_REQUEST;
-    }
+        use BackendError::*;
 
-    if rej.find::<PartsMissingError>().is_some() {
-        code = StatusCode::BAD_REQUEST;
+        match e {
+            BadRequest => code = StatusCode::BAD_REQUEST,
+            PartsMissing => code = StatusCode::BAD_REQUEST,
+            Sqlx { .. } => code = StatusCode::INTERNAL_SERVER_ERROR,
+        }
+    } else {
+        error!(logger, "Unknown rejection"; "rejection" => format!("{:?}", rej));
     }
 
     let response = StorageResponse {
@@ -109,17 +113,17 @@ async fn format_rejection(rej: reject::Rejection) -> Result<WithStatus<Json>, In
     Ok(with_status(json(&response), code))
 }
 
-async fn collect_parts(content: FormData) -> Result<Vec<Part>, BadRequestError> {
+async fn collect_parts(content: FormData) -> Result<Vec<Part>, BackendError> {
     let parts = (content.collect::<Vec<Result<Part, _>>>()).await;
     let vec = parts
         .into_iter()
         .collect::<Result<Vec<Part>, _>>()
         // TODO this should be a more specific error
-        .map_err(|_| BadRequestError)?;
+        .map_err(|_| BackendError::BadRequest)?;
     Ok(vec)
 }
 
-fn parse_parts(parts: &mut Vec<Part>) -> Result<Upload, PartsMissingError> {
+fn parse_parts(parts: &mut Vec<Part>) -> Result<Upload, BackendError> {
     let mut audio = None;
     let mut metadata = None;
 
@@ -135,7 +139,7 @@ fn parse_parts(parts: &mut Vec<Part>) -> Result<Upload, PartsMissingError> {
 
     if metadata.is_none() || audio.is_none() {
         // TODO this should be a more specific error
-        return Err(PartsMissingError);
+        return Err(BackendError::PartsMissing);
     }
 
     Ok(Upload {
@@ -153,39 +157,6 @@ struct Upload {
 struct StorageResponse {
     status: Response,
 }
-
-#[derive(Debug, Deserialize, Serialize)]
-struct BadRequestError;
-
-impl reject::Reject for BadRequestError {}
-
-impl From<BadRequestError> for reject::Rejection {
-    fn from(e: BadRequestError) -> Self {
-        warp::reject::custom(e)
-    }
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-struct PartsMissingError;
-
-impl reject::Reject for PartsMissingError {}
-
-#[derive(Debug, Deserialize, Serialize)]
-struct StorageError;
-
-impl<E: std::error::Error> From<E> for StorageError {
-    fn from(_: E) -> Self {
-        StorageError
-    }
-}
-
-impl From<StorageError> for reject::Rejection {
-    fn from(e: StorageError) -> Self {
-        warp::reject::custom(e)
-    }
-}
-
-impl reject::Reject for StorageError {}
 
 #[derive(Deserialize, Serialize)]
 enum Response {
