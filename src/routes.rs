@@ -73,7 +73,7 @@ async fn process_upload<O>(
         let logger = logger.new(slog::o!("key" => key_as_str.to_owned()));
         debug!(logger, "generated key");
 
-        store.save(&key_as_str, upload.audio).await
+        store.save(key_as_str, upload.audio).await
             .map_err(|x| {
                 error!(logger, "Failed to save"; "error" => format!("{:?}", x));
                 reject::custom(StorageError)

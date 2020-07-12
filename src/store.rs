@@ -1,3 +1,4 @@
+use std::future::Future;
 use std::sync::Arc;
 
 use bytes::Buf;
@@ -16,7 +17,7 @@ pub trait Store: Send + Sync {
     type Raw;
 
     /// Saves the given data under the given key.
-    fn save(&self, key: impl AsRef<str>, raw: Self::Raw) -> BoxFuture<Result<Self::Output, StoreError>>;
+    fn save(&self, key: String, raw: Self::Raw) -> BoxFuture<Result<Self::Output, StoreError>>;
 }
 
 /// A store that saves its data to S3.
@@ -40,8 +41,9 @@ impl S3Store {
         }
     }
 
-    /// Parses raw data into format required by S3.
-    fn parse_raw_into_body(&self, raw: Part) -> Result<StreamingBody, ()> {
+    /// Parses raw data into format required by S3. Unused while we
+    /// wait on <https://github.com/rusoto/rusoto/issues/1592>.
+    fn parse_part_into_body(&self, raw: Part) -> Result<StreamingBody, ()> {
         use std::io;
         let body = StreamingBody::new(raw.stream().map(|r| {
             r.map(|mut x| x.to_bytes())
@@ -55,28 +57,46 @@ impl Store for S3Store {
     type Output = ();
     type Raw = Part;
 
-    fn save(&self, key: impl AsRef<str>, raw: Part) -> BoxFuture<Result<(), StoreError>> {
-        let parsed = self.parse_raw_into_body(raw);
+    fn save(&self, key: String, raw: Part) -> BoxFuture<Result<(), StoreError>> {
+        upload(self, key, raw).boxed()
+    }
+}
 
-        match parsed {
-            Ok(body) => {
+async fn upload(store: &S3Store, key: String, raw: Part) -> Result<(), StoreError> {
+    use std::io;
 
-                let request = PutObjectRequest {
-                    acl: Some(self.acl.clone()),
-                    body: Some(body),
-                    bucket: self.bucket.clone(),
-                    cache_control: Some(self.cache_control.clone()),
-                    content_type: Some(self.content_type.clone()),
-                    key: key.as_ref().to_owned(),
-                    ..Default::default()
-                };
+    // TODO we'd like to pass the stream itself to the
+    // PutObjectRequest, but an oversight in the library makes it
+    // omit the Content-Length header in that case, which causes
+    // S3 to reject it.
+    let stream = raw.stream().map(|r| {
+        r.map(|mut x| x.to_bytes())
+            .map_err(|_| io::Error::new(io::ErrorKind::Other, "could not retrieve chunk"))
+    });
 
-                self.client.put_object(request).map(|r| match r {
-                    Ok(_) => Ok(()),
-                    Err(x) => Err(StoreError::UploadError { source: x }),
-                }).boxed()
-            },
-            Err(_) => futures::future::err(StoreError::ContentParsingError).boxed(),
-        }
+    let full_body = stream.collect::<Vec<_>>().await;
+
+    let mut total: i64 = 0;
+
+    for r in full_body.iter() {
+        total += r.as_ref().map_err(|_| StoreError::ContentParsingError)?.remaining() as i64;
+    }
+
+    let request = PutObjectRequest {
+        acl: Some(store.acl.clone()),
+        body: Some(StreamingBody::new(futures::stream::iter(full_body))),
+        bucket: store.bucket.clone(),
+        cache_control: Some(store.cache_control.clone()),
+        content_length: Some(total),
+        content_type: Some(store.content_type.clone()),
+        key,
+        ..Default::default()
+    };
+
+    let result = store.client.put_object(request).await;
+
+    match result {
+        Ok(_) => Ok(()),
+        Err(x) => Err(StoreError::UploadError { source: x }),
     }
 }
