@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use bytes::Buf;
-use futures::{StreamExt};
 use futures::future::{BoxFuture, FutureExt};
-use rusoto_s3::{PutObjectRequest, S3Client, S3, StreamingBody};
+use futures::StreamExt;
+use rusoto_s3::{PutObjectRequest, S3Client, StreamingBody, S3};
 use warp::filters::multipart::Part;
 
 use crate::errors::StoreError;
@@ -30,7 +30,13 @@ pub struct S3Store {
 
 impl S3Store {
     /// Creates a new instance.
-    pub fn new(client: Arc<S3Client>, acl: String, bucket: String, cache_control: String, content_type: String) -> Self {
+    pub fn new(
+        client: Arc<S3Client>,
+        acl: String,
+        bucket: String,
+        cache_control: String,
+        content_type: String,
+    ) -> Self {
         Self {
             client,
             acl,
@@ -78,7 +84,10 @@ async fn upload(store: &S3Store, key: String, raw: Part) -> Result<(), StoreErro
     let mut total: i64 = 0;
 
     for r in full_body.iter() {
-        total += r.as_ref().map_err(|_| StoreError::ContentParsingError)?.remaining() as i64;
+        total += r
+            .as_ref()
+            .map_err(|_| StoreError::ContentParsingError)?
+            .remaining() as i64;
     }
 
     let request = PutObjectRequest {
