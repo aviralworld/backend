@@ -138,7 +138,7 @@ fn status_code_for(e: &BackendError) -> StatusCode {
         BadRequest | TooManyStreams(_, _) | WrongMediaType(_) => StatusCode::BAD_REQUEST,
         PartsMissing => StatusCode::BAD_REQUEST,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
-        }
+    }
 }
 
 async fn collect_parts(content: FormData) -> Result<Vec<Part>, BackendError> {
@@ -179,14 +179,13 @@ fn parse_parts(parts: &mut Vec<Part>) -> Result<Upload, BackendError> {
 #[cfg(test)]
 mod test {
     use std::collections::HashMap;
+    use std::path::Path;
     use std::sync::RwLock;
 
     use futures::future::BoxFuture;
-    use proptest::prelude::*;
     use serde::Deserialize;
-    use warp::filters::multipart::Part;
 
-    use crate::errors::StoreError;
+    use crate::errors;
     use crate::store::Store;
 
     #[derive(Debug, Deserialize)]
@@ -203,75 +202,124 @@ mod test {
 
     impl Store for MockStore {
         type Output = ();
-        type Raw = Part;
+        type Raw = Vec<u8>;
 
-        fn save(&self, key: String, raw: Part) -> BoxFuture<Result<(), StoreError>> {
+        fn save(&self, key: String, raw: Vec<u8>) -> BoxFuture<Result<(), errors::StoreError>> {
             use futures::FutureExt;
 
             mock_save(&self, key, raw).boxed()
         }
     }
 
-    async fn mock_save(store: &MockStore, key: String, raw: Part) -> Result<(), StoreError> {
-        use bytes::Buf;
-        use futures::StreamExt;
-
-        let vec_of_results = raw.stream().collect::<Vec<_>>().await;
-        let vec_of_bufs = vec_of_results
-            .into_iter()
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap();
-        let vec_of_vecs = vec_of_bufs
-            .into_iter()
-            .map(|b| b.bytes().to_vec())
-            .collect::<Vec<_>>();
-
-        store.map.write().unwrap().insert(key, vec_of_vecs.concat());
+    async fn mock_save(
+        store: &MockStore,
+        key: String,
+        raw: Vec<u8>,
+    ) -> Result<(), errors::StoreError> {
+        store.map.write().unwrap().insert(key, raw);
 
         Ok(())
     }
 
-    proptest! {
-        #![proptest_config(ProptestConfig {
-            cases: 50, ..ProptestConfig::default()
-        })]
+    #[test]
+    fn uploading_works() {
+        use std::borrow::Borrow;
+        use std::env;
+        use std::path::Path;
+        use std::sync::Arc;
 
-        // 500..100000 is the size range in bytes; I'd like to make it
-        // 20 MB (20_971_520), but the tests get very slow
-        #[test]
-        fn uploading_things_works(data in prop::collection::vec(0u8..255u8, 500..100000), boundary in "-{5,20}[a-zA-Z0-9]{10,20}") {
-            use std::borrow::Borrow;
-            use std::sync::Arc;
+        use futures::executor::block_on;
+        use slog;
 
-            use futures::executor::block_on;
-            use slog;
+        let boundary = "thisisaboundary1234";
 
-            let content_type = multipart_content_type(&boundary);
+        let content_type = multipart_content_type(&boundary);
 
-            let store = MockStore { ..Default::default() };
+        let store = MockStore {
+            ..Default::default()
+        };
 
-            let logger = slog::Logger::root(slog::Discard, slog::o!());
-            let logger_arc = Arc::new(logger);
+        let logger = slog::Logger::root(slog::Discard, slog::o!());
+        let logger_arc = Arc::new(logger);
 
-            let filter = super::make_upload_route(logger_arc.clone(), Arc::new(store));
+        let checker = make_wrapper_for_test();
 
-            let request_body = make_multipart_body(boundary.as_bytes(), "{}".as_bytes(), &data);
+        let filter =
+            super::make_upload_route(logger_arc.clone(), Arc::new(store), Arc::new(checker));
 
-            let response = block_on(warp::test::request()
-                                    .path("/recordings/")
-                                    .method("POST")
-                                    .header("content-type", &content_type)
-                                    .body(request_body)
-                                    .reply(&filter));
+        let cargo_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
+        let base_path = Path::new(&cargo_dir);
+        let file_path = base_path.join("tests").join("opus_file.ogg");
 
+        let response = block_on(
+            upload_file(
+                &file_path,
+                &content_type,
+                boundary.as_bytes(),
+                "{}".as_bytes(),
+            )
+            .reply(&filter),
+        );
+
+        let status = response.status();
+        let body = String::from_utf8_lossy(response.body());
+
+        assert!(status.is_success());
+
+        let deserialized: Reply =
+            serde_json::from_str(body.borrow()).expect("parse response as JSON");
+        assert_eq!(deserialized.status, "Ok", "response status must be okay");
+        assert!(
+            deserialized.key.unwrap() != "",
+            "response must provide non-blank key"
+        );
+    }
+
+    #[test]
+    fn bad_requests_fail() {
+        use bytes::Bytes;
+
+        fn assert_failed(
+            response: warp::http::Response<Bytes>,
+            expected_status: u16,
+            verify_error_type: &dyn Fn(StatusCode) -> bool,
+        ) {
             let status = response.status();
-            let body = String::from_utf8_lossy(response.body());
+            eprintln!("Got status: {:?}", status);
+            eprintln!("Body: {:?}", response.body());
+            assert!(verify_error_type(status));
+            assert_eq!(status.as_u16(), expected_status);
+        }
 
-            prop_assert!(status.is_success());
+        use std::sync::Arc;
+        use warp::http::StatusCode;
 
-            let deserialized: Reply = serde_json::from_str(body.borrow())?;
-            prop_assert_eq!(deserialized.status, "Ok", "response status must be okay");
-            prop_assert!(deserialized.key.unwrap() != "", "response must provide non-blank key");
+        use futures::executor::block_on;
+        use slog;
+
+        let store = MockStore {
+            ..Default::default()
+        };
+
+        let logger = slog::Logger::root(slog::Discard, slog::o!());
+        let logger_arc = Arc::new(logger);
+
+        let checker = make_wrapper_for_test();
+
+        let filter =
+            super::make_upload_route(logger_arc.clone(), Arc::new(store), Arc::new(checker));
+
+        {
+            let response = block_on(
+                warp::test::request()
+                    .path("/recordings/")
+                    .method("POST")
+                    .header("content-type", "text/plain")
+                    .header("content-length", 0)
+                    .reply(&filter),
+            );
+
+            assert_failed(response, 400, &|s: StatusCode| s.is_client_error());
         }
     }
 
@@ -282,6 +330,36 @@ mod test {
         "Content-Disposition: form-data; name=\"audio\"\r\nContent-Type: audio/ogg\r\n\r\n"
             .as_bytes();
     const BOUNDARY_LEADER: &[u8] = &[b'-', b'-'];
+
+    fn upload_file(
+        path: impl AsRef<Path>,
+        content_type: &str,
+        boundary: &[u8],
+        metadata: &[u8],
+    ) -> warp::test::RequestBuilder {
+        use std::fs;
+
+        let data =
+            fs::read(path.as_ref()).expect(&format!("read file {:?}", path.as_ref().display()));
+        let body = make_multipart_body(boundary, metadata, &data);
+
+        warp::test::request()
+            .path("/recordings/")
+            .method("POST")
+            .header("content-type", content_type)
+            .header("content-length", body.len())
+            .body(body)
+    }
+
+    fn make_wrapper_for_test() -> impl Fn(&[u8]) -> Result<(), errors::BackendError> {
+        use crate::audio;
+        use std::env;
+
+        audio::make_wrapper(
+            env::var("BACKEND_FFPROBE_PATH").ok(),
+            env::var("BACKEND_CODEC").expect("must define BACKEND_CODEC environment variable"),
+        )
+    }
 
     fn make_multipart_body(boundary: &[u8], metadata: &[u8], content: &[u8]) -> Vec<u8> {
         let boundary = boundary_with_leader(boundary);

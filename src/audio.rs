@@ -2,9 +2,16 @@ use crate::errors::BackendError;
 
 pub trait CodecChecker {
     fn is_codec(&self, data: &[u8], expected_codec: &str) -> Result<bool, BackendError>;
+
+    fn new(ffprobe_path: Option<String>) -> Self;
 }
 
-pub use inner::*;
+pub fn make_wrapper(ffprobe_path: Option<String>, expected_codec: String) -> impl Fn(&[u8]) -> Result<(), BackendError> {
+    let checker = inner::Checker::new(ffprobe_path);
+    let expected_codec = expected_codec;
+
+    move |data: &[u8]| checker.is_codec(data, &expected_codec).map(|_| ())
+}
 
 #[cfg(not(use_ffmpeg_sys))]
 mod inner {
@@ -32,11 +39,6 @@ mod inner {
     }
 
     impl Checker {
-        pub fn new(path: impl AsRef<Path>) -> Self {
-            Checker {
-                ffprobe: path.as_ref().to_owned(),
-            }
-        }
     }
 
     impl super::CodecChecker for Checker {
@@ -87,6 +89,12 @@ mod inner {
             let codec = &stream.codec_name;
             Ok(codec == expected_codec)
         }
+
+        fn new(path: Option<String>) -> Self {
+            Checker {
+                ffprobe: PathBuf::from(path.expect("must provide ffprobe path or use ffmpeg library")),
+            }
+        }
     }
 }
 
@@ -99,8 +107,12 @@ mod inner {
     pub struct Checker;
 
     impl CodecChecker for Checker {
-        pub fn is_codec(&self, data: &[u8], expected_codec: &str) -> Result<bool, BackendError> {
+        fn is_codec(&self, data: &[u8], expected_codec: &str) -> Result<bool, BackendError> {
             unimplemented!()
+        }
+
+        fn new(_path: impl AsRef<Path>) -> Self {
+            Self
         }
     }
 }
