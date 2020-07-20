@@ -15,6 +15,7 @@ use rusoto_credential::StaticProvider;
 use rusoto_s3::S3Client;
 use tokio;
 
+use backend::audio::CodecChecker;
 use backend::routes::make_upload_route;
 use backend::store::S3Store;
 
@@ -50,8 +51,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let logger = Arc::new(initialize_logger());
+    let checker = initialize_ogg_checker(env::var("BACKEND_FFPROBE_PATH").ok());
 
-    let routes = make_upload_route(logger, Arc::new(store));
+    let expected_codec = get_variable("BACKEND_CODEC");
+
+    let check_fn = move |data: &[u8]| checker.is_codec(data, &expected_codec).map(|_| ());
+
+    let routes = make_upload_route(logger, Arc::new(store), Arc::new(check_fn));
     warp::serve(routes).run(([127, 0, 0, 1], 3030)).await;
 
     Ok(())
@@ -71,4 +77,18 @@ fn initialize_logger() -> slog::Logger {
 
 fn get_variable(name: &str) -> String {
     env::var(name).expect(&format!("must define {} environment variable", name))
+}
+
+#[cfg(not(use_ffmpeg_sys))]
+fn initialize_ogg_checker(ffprobe_path: Option<String>) -> impl CodecChecker {
+    use backend::audio::Checker;
+
+    Checker::new(ffprobe_path.expect("must define ffprobe path or compile with `use_ffmpeg_sys`"))
+}
+
+#[cfg(use_ffmpeg_sys)]
+fn initialize_ogg_checker(ffprobe_path: Option<String>) -> impl CodecChecker {
+    use backend::audio::Checker;
+
+    Checker
 }

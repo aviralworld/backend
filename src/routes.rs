@@ -1,4 +1,3 @@
-use std::convert::Infallible;
 use std::sync::Arc;
 
 use futures::{
@@ -6,7 +5,7 @@ use futures::{
     StreamExt,
 };
 use serde::{Deserialize, Serialize};
-use slog::{debug, error, info, Logger};
+use slog::{debug, error, Logger};
 // use sqlx::prelude::*;
 // use sqlx::postgres::PgPool;
 use uuid::Uuid;
@@ -44,11 +43,13 @@ const MAX_CONTENT_LENGTH: u64 = 2 * 1024 * 1024 * 1024;
 
 pub fn make_upload_route<'a, O: 'a>(
     logger: Arc<Logger>,
-    store: Arc<impl Store<Output = O, Raw = Part> + 'a>,
-) -> impl warp::Filter<Extract = (impl Reply,), Error = Infallible> + Clone + 'a {
+    store: Arc<impl Store<Output = O, Raw = Vec<u8>> + 'a>,
+    checker: Arc<impl Fn(&[u8]) -> Result<(), BackendError> + Send + Sync + 'a>,
+) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
     let store = store.clone();
     let logger1 = logger.clone();
     let logger2 = logger.clone();
+    let checker = checker.clone();
 
     // TODO this should stream the body from the request, but warp
     // doesn't support that yet
@@ -59,7 +60,7 @@ pub fn make_upload_route<'a, O: 'a>(
             move |content: FormData| -> BoxFuture<Result<WithStatus<Json>, reject::Rejection>> {
                 debug!(logger1, "recording submitted");
 
-                process_upload(logger1.clone(), store.clone(), content).boxed()
+                process_upload(logger1.clone(), store.clone(), checker.clone(), content).boxed()
             },
         )
         .recover(move |r| format_rejection(logger2.clone(), r))
@@ -67,15 +68,26 @@ pub fn make_upload_route<'a, O: 'a>(
 
 async fn process_upload<O>(
     logger: Arc<Logger>,
-    store: Arc<impl Store<Output = O, Raw = Part>>,
+    store: Arc<impl Store<Output = O, Raw = Vec<u8>>>,
+    checker: Arc<impl Fn(&[u8]) -> Result<(), BackendError>>,
     content: FormData,
 ) -> Result<WithStatus<Json>, reject::Rejection> {
+    use crate::io;
+
     let mut parts = collect_parts(content).await?;
     debug!(logger, "collected parts");
     let upload = parse_parts(&mut parts).map_err(reject::custom)?;
     debug!(logger, "parsed parts");
 
-    // TODO verify audio is Opus
+    let audio_data = io::part_as_stream(upload.audio)
+        .collect::<Vec<_>>()
+        .await
+        .into_iter()
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| reject::custom(StoreError::MalformedFormSubmission))?
+        .concat();
+
+    checker(&audio_data).map_err(reject::custom)?;
 
     {
         let key = Uuid::new_v4();
@@ -84,7 +96,7 @@ async fn process_upload<O>(
         debug!(logger, "generated key");
 
         store
-            .save(key_as_str.clone(), upload.audio)
+            .save(key_as_str.clone(), audio_data)
             .await
             .map_err(|x| {
                 error!(logger, "Failed to save"; "error" => format!("{:?}", x));
@@ -105,29 +117,28 @@ async fn process_upload<O>(
 async fn format_rejection(
     logger: Arc<Logger>,
     rej: reject::Rejection,
-) -> Result<WithStatus<Json>, Infallible> {
-    let mut code = StatusCode::INTERNAL_SERVER_ERROR;
-
+) -> Result<WithStatus<Json>, reject::Rejection> {
     if let Some(e) = rej.find::<BackendError>() {
         error!(logger, "Backend error"; "error" => format!("{:?}", e));
+        let response = StorageResponse {
+            status: Response::Error,
+            key: None,
+        };
 
-        use BackendError::*;
-
-        match e {
-            BadRequest => code = StatusCode::BAD_REQUEST,
-            PartsMissing => code = StatusCode::BAD_REQUEST,
-            Sqlx { .. } => code = StatusCode::INTERNAL_SERVER_ERROR,
-        }
-    } else {
-        error!(logger, "Unknown rejection"; "rejection" => format!("{:?}", rej));
+        return Ok(with_status(json(&response), status_code_for(e)));
     }
 
-    let response = StorageResponse {
-        status: Response::Error,
-        key: None,
-    };
+    Err(rej)
+}
 
-    Ok(with_status(json(&response), code))
+fn status_code_for(e: &BackendError) -> StatusCode {
+    use BackendError::*;
+
+    match e {
+        BadRequest | TooManyStreams(_, _) | WrongMediaType(_) => StatusCode::BAD_REQUEST,
+        PartsMissing => StatusCode::BAD_REQUEST,
+        _ => StatusCode::INTERNAL_SERVER_ERROR,
+        }
 }
 
 async fn collect_parts(content: FormData) -> Result<Vec<Part>, BackendError> {

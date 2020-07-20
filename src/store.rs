@@ -1,10 +1,7 @@
 use std::sync::Arc;
 
-use bytes::Buf;
 use futures::future::{BoxFuture, FutureExt};
-use futures::StreamExt;
 use rusoto_s3::{PutObjectRequest, S3Client, StreamingBody, S3};
-use warp::filters::multipart::Part;
 
 use crate::errors::StoreError;
 
@@ -45,57 +42,28 @@ impl S3Store {
             content_type,
         }
     }
-
-    /// Parses raw data into format required by S3. Unused while we
-    /// wait on <https://github.com/rusoto/rusoto/issues/1592>.
-    fn parse_part_into_body(&self, raw: Part) -> Result<StreamingBody, ()> {
-        use std::io;
-        let body = StreamingBody::new(raw.stream().map(|r| {
-            r.map(|mut x| x.to_bytes())
-                .map_err(|_| io::Error::new(io::ErrorKind::Other, "could not retrieve chunk"))
-        }));
-        Ok(body)
-    }
 }
 
 impl Store for S3Store {
     type Output = ();
-    type Raw = Part;
+    type Raw = Vec<u8>;
 
-    fn save(&self, key: String, raw: Part) -> BoxFuture<Result<(), StoreError>> {
+    fn save(&self, key: String, raw: Vec<u8>) -> BoxFuture<Result<(), StoreError>> {
         upload(self, key, raw).boxed()
     }
 }
 
-async fn upload(store: &S3Store, key: String, raw: Part) -> Result<(), StoreError> {
-    use std::io;
+async fn upload(store: &S3Store, key: String, raw: Vec<u8>) -> Result<(), StoreError> {
+    use std::convert::TryFrom;
 
-    // TODO we'd like to pass the stream itself to the
-    // PutObjectRequest, but an oversight in the library makes it
-    // omit the Content-Length header in that case, which causes
-    // S3 to reject it.
-    let stream = raw.stream().map(|r| {
-        r.map(|mut x| x.to_bytes())
-            .map_err(|_| io::Error::new(io::ErrorKind::Other, "could not retrieve chunk"))
-    });
-
-    let full_body = stream.collect::<Vec<_>>().await;
-
-    let mut total: i64 = 0;
-
-    for r in full_body.iter() {
-        total += r
-            .as_ref()
-            .map_err(|_| StoreError::ContentParsingError)?
-            .remaining() as i64;
-    }
+    let len = i64::try_from(raw.len()).expect("raw data length must be within range of i64");
 
     let request = PutObjectRequest {
         acl: Some(store.acl.clone()),
-        body: Some(StreamingBody::new(futures::stream::iter(full_body))),
+        body: Some(StreamingBody::from(raw)),
         bucket: store.bucket.clone(),
         cache_control: Some(store.cache_control.clone()),
-        content_length: Some(total),
+        content_length: Some(len),
         content_type: Some(store.content_type.clone()),
         key,
         ..Default::default()
@@ -105,6 +73,6 @@ async fn upload(store: &S3Store, key: String, raw: Part) -> Result<(), StoreErro
 
     match result {
         Ok(_) => Ok(()),
-        Err(x) => Err(StoreError::UploadError { source: x }),
+        Err(e) => Err(StoreError::UploadFailed { source: e }),
     }
 }
