@@ -1,7 +1,7 @@
 use crate::errors::BackendError;
 
 pub trait CodecChecker {
-    fn is_codec(&self, data: &[u8], expected_codec: &str) -> Result<bool, BackendError>;
+    fn check_codec(&self, data: &[u8], expected_codec: &str) -> Result<(), BackendError>;
 
     fn new(ffprobe_path: Option<String>) -> Self;
 }
@@ -10,7 +10,7 @@ pub fn make_wrapper(ffprobe_path: Option<String>, expected_codec: String) -> imp
     let checker = inner::Checker::new(ffprobe_path);
     let expected_codec = expected_codec;
 
-    move |data: &[u8]| checker.is_codec(data, &expected_codec).map(|_| ())
+    move |data: &[u8]| checker.check_codec(data, &expected_codec).map(|_| ())
 }
 
 #[cfg(not(use_ffmpeg_sys))]
@@ -42,7 +42,7 @@ mod inner {
     }
 
     impl super::CodecChecker for Checker {
-        fn is_codec(&self, data: &[u8], expected_codec: &str) -> Result<bool, BackendError> {
+        fn check_codec(&self, data: &[u8], expected_codec: &str) -> Result<(), BackendError> {
             use std::io::Write;
             use std::process::Command;
 
@@ -87,7 +87,14 @@ mod inner {
 
             let stream = streams.first().unwrap();
             let codec = &stream.codec_name;
-            Ok(codec == expected_codec)
+
+            eprintln!("comparing actual {:?} to expected {:?}", codec, expected_codec);
+
+            if codec == expected_codec {
+                return Ok(())
+            }
+
+            Err(BackendError::WrongMediaType(expected_codec.to_owned()))
         }
 
         fn new(path: Option<String>) -> Self {
@@ -107,7 +114,7 @@ mod inner {
     pub struct Checker;
 
     impl CodecChecker for Checker {
-        fn is_codec(&self, data: &[u8], expected_codec: &str) -> Result<bool, BackendError> {
+        fn check_codec(&self, data: &[u8], expected_codec: &str) -> Result<(), BackendError> {
             unimplemented!()
         }
 

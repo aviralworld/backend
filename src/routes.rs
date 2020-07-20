@@ -135,7 +135,8 @@ fn status_code_for(e: &BackendError) -> StatusCode {
     use BackendError::*;
 
     match e {
-        BadRequest | TooManyStreams(_, _) | WrongMediaType(_) => StatusCode::BAD_REQUEST,
+        BadRequest | TooManyStreams(..) => StatusCode::BAD_REQUEST,
+        WrongMediaType(..) => StatusCode::UNSUPPORTED_MEDIA_TYPE,
         PartsMissing => StatusCode::BAD_REQUEST,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     }
@@ -285,8 +286,6 @@ mod test {
             verify_error_type: &dyn Fn(StatusCode) -> bool,
         ) {
             let status = response.status();
-            eprintln!("Got status: {:?}", status);
-            eprintln!("Body: {:?}", response.body());
             assert!(verify_error_type(status));
             assert_eq!(status.as_u16(), expected_status);
         }
