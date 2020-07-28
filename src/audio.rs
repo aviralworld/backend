@@ -6,7 +6,10 @@ pub trait CodecChecker {
     fn new(ffprobe_path: Option<String>) -> Self;
 }
 
-pub fn make_wrapper(ffprobe_path: Option<String>, expected_codec: String) -> impl Fn(&[u8]) -> Result<(), BackendError> {
+pub fn make_wrapper(
+    ffprobe_path: Option<String>,
+    expected_codec: String,
+) -> impl Fn(&[u8]) -> Result<(), BackendError> {
     let checker = inner::Checker::new(ffprobe_path);
     let expected_codec = expected_codec;
 
@@ -16,9 +19,10 @@ pub fn make_wrapper(ffprobe_path: Option<String>, expected_codec: String) -> imp
 #[cfg(not(use_ffmpeg_sys))]
 mod inner {
     use std::ffi::OsString;
-    use std::path::{Path, PathBuf};
+    use std::path::PathBuf;
 
     use lazy_static::lazy_static;
+    use serde::Deserialize;
 
     use crate::errors::BackendError;
 
@@ -38,45 +42,41 @@ mod inner {
         ffprobe: PathBuf,
     }
 
-    impl Checker {
+    #[derive(Deserialize)]
+    struct FfprobeOutput {
+        streams: Vec<FfprobeStream>,
     }
+
+    #[derive(Deserialize)]
+    struct FfprobeStream {
+        codec_name: String,
+    }
+
+    impl Checker {}
 
     impl super::CodecChecker for Checker {
         fn check_codec(&self, data: &[u8], expected_codec: &str) -> Result<(), BackendError> {
             use std::io::Write;
             use std::process::Command;
 
-            use serde::Deserialize;
             use tempfile::NamedTempFile;
 
-            #[derive(Deserialize)]
-            struct FfprobeOutput {
-                programs: Vec<String>,
-                streams: Vec<FfprobeStream>,
-            }
-
-            #[derive(Deserialize)]
-            struct FfprobeStream {
-                codec_name: String,
-            }
-
             let output_path = {
-                let mut output = NamedTempFile::new()
-                    .map_err(|e| BackendError::TemporaryFileError(e))?;
+                let mut output =
+                    NamedTempFile::new().map_err(|e| BackendError::TemporaryFileError(e))?;
                 output
                     .write_all(data)
                     .map_err(BackendError::TemporaryFileError)?;
                 output.into_temp_path()
             };
 
-            // TODO handle malformed output differently
             let output = Command::new(&self.ffprobe)
                 .args(&[FFPROBE_ARGS.clone(), vec![OsString::from(&output_path)]].concat())
                 .output()
                 .map_err(BackendError::FfprobeFailed)?;
 
-            let parsed: FfprobeOutput =
-                serde_json::from_slice(&output.stdout).map_err(BackendError::MalformedFfprobeOutput)?;
+            let parsed: FfprobeOutput = serde_json::from_slice(&output.stdout)
+                .map_err(BackendError::MalformedFfprobeOutput)?;
 
             let streams = parsed.streams;
             let len = streams.len();
@@ -88,10 +88,13 @@ mod inner {
             let stream = streams.first().unwrap();
             let codec = &stream.codec_name;
 
-            eprintln!("comparing actual {:?} to expected {:?}", codec, expected_codec);
+            eprintln!(
+                "comparing actual {:?} to expected {:?}",
+                codec, expected_codec
+            );
 
             if codec == expected_codec {
-                return Ok(())
+                return Ok(());
             }
 
             Err(BackendError::WrongMediaType(expected_codec.to_owned()))
@@ -99,7 +102,9 @@ mod inner {
 
         fn new(path: Option<String>) -> Self {
             Checker {
-                ffprobe: PathBuf::from(path.expect("must provide ffprobe path or use ffmpeg library")),
+                ffprobe: PathBuf::from(
+                    path.expect("must provide ffprobe path or use ffmpeg library"),
+                ),
             }
         }
     }
@@ -115,7 +120,7 @@ mod inner {
 
     impl CodecChecker for Checker {
         fn check_codec(&self, data: &[u8], expected_codec: &str) -> Result<(), BackendError> {
-            unimplemented!()
+            todo!()
         }
 
         fn new(_path: impl AsRef<Path>) -> Self {
