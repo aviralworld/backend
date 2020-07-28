@@ -7,7 +7,7 @@ use futures::{
 use serde::{Deserialize, Serialize};
 use slog::{debug, error, Logger};
 // use sqlx::prelude::*;
-// use sqlx::postgres::PgPool;
+use sqlx::postgres::PgPool;
 use uuid::Uuid;
 use warp::filters::multipart::{form, FormData, Part};
 use warp::http::StatusCode;
@@ -15,8 +15,9 @@ use warp::reject;
 use warp::reply::{json, with_status, Json, Reply, WithStatus};
 use warp::Filter;
 
+use crate::db;
 use crate::errors::{BackendError, StoreError};
-use crate::queries::retrieval;
+use crate::recording::RecordingMetadata;
 use crate::store::Store;
 
 // create, delete, update, retrieve, count
@@ -43,10 +44,12 @@ const MAX_CONTENT_LENGTH: u64 = 2 * 1024 * 1024 * 1024;
 
 pub fn make_upload_route<'a, O: 'a>(
     logger: Arc<Logger>,
+    pool: Arc<PgPool>,
     store: Arc<impl Store<Output = O, Raw = Vec<u8>> + 'a>,
     checker: Arc<impl Fn(&[u8]) -> Result<(), BackendError> + Send + Sync + 'a>,
 ) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
     let store = store.clone();
+    let pool = pool.clone();
     let logger1 = logger.clone();
     let logger2 = logger.clone();
     let checker = checker.clone();
@@ -60,7 +63,7 @@ pub fn make_upload_route<'a, O: 'a>(
             move |content: FormData| -> BoxFuture<Result<WithStatus<Json>, reject::Rejection>> {
                 debug!(logger1, "recording submitted");
 
-                process_upload(logger1.clone(), store.clone(), checker.clone(), content).boxed()
+                process_upload(logger1.clone(), pool.clone(), store.clone(), checker.clone(), content).boxed()
             },
         )
         .recover(move |r| format_rejection(logger2.clone(), r))
@@ -68,6 +71,7 @@ pub fn make_upload_route<'a, O: 'a>(
 
 async fn process_upload<O>(
     logger: Arc<Logger>,
+    pool: Arc<PgPool>,
     store: Arc<impl Store<Output = O, Raw = Vec<u8>>>,
     checker: Arc<impl Fn(&[u8]) -> Result<(), BackendError>>,
     content: FormData,
@@ -79,18 +83,40 @@ async fn process_upload<O>(
     let upload = parse_parts(&mut parts).map_err(reject::custom)?;
     debug!(logger, "parsed parts");
 
-    let audio_data = io::part_as_stream(upload.audio)
-        .collect::<Vec<_>>()
+    let raw_metadata = io::part_as_vec(upload.metadata)
         .await
-        .into_iter()
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|_| reject::custom(StoreError::MalformedFormSubmission))?
-        .concat();
+        .map_err(|_| StoreError::MalformedFormSubmission)?;
+    let metadata: RecordingMetadata = serde_json::from_slice(&raw_metadata)
+        .map_err(|e| reject::custom(BackendError::MalformedUploadMetadata(e)))?;
+
+    debug!(logger, "parsed upload metadata"; metadata => &metadata);
+
+    let new_recording = db::insert_recording_metadata(metadata, &*pool).await?;
+    let id = new_recording.id();
+
+    debug!(logger, "got ID of inserted row"; id => &id);
+
+    process_upload_audio(logger, store, checker, id, upload.audio).await
+}
+
+async fn process_upload_audio<O>(
+    logger: Arc<Logger>,
+    store: Arc<impl Store<Output = O, Raw = Vec<u8>>>,
+    checker: Arc<impl Fn(&[u8]) -> Result<(), BackendError>>,
+    key: &Uuid,
+    upload: Part,
+) -> Result<WithStatus<Json>, reject::Rejection> {
+    use crate::io;
+
+    let audio_data = io::part_as_vec(upload)
+        .await
+        .map_err(|_| reject::custom(StoreError::MalformedFormSubmission))?;
 
     checker(&audio_data).map_err(reject::custom)?;
 
+    debug!(logger, "verified audio codec");
+
     {
-        let key = Uuid::new_v4();
         let key_as_str = format!("{}", key);
         let logger = logger.new(slog::o!("key" => key_as_str.clone()));
         debug!(logger, "generated key");

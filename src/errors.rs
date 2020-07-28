@@ -34,6 +34,10 @@ pub enum BackendError {
     #[error("failed to parse JSON received from `ffprobe`: {0}")]
     MalformedFfprobeOutput(serde_json::Error),
 
+    /// Represents an error caused by the user uploading malformed metadata.
+    #[error("failed to parse uploaded metadata: {0}")]
+    MalformedUploadMetadata(serde_json::Error),
+
     /// Represents an error caused by the user uploading a media file of the wrong kind.
     #[error("wrong media type (should be {0})")]
     WrongMediaType(String),
@@ -52,7 +56,7 @@ pub enum StoreError {
 
     /// Represents an error returned by the remote server when uploading.
     #[error("failed to upload object to S3")]
-    UploadFailed{ source: RusotoError<PutObjectError> },
+    UploadFailed { source: RusotoError<PutObjectError> },
 }
 
 impl reject::Reject for BackendError {}
