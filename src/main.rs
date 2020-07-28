@@ -16,6 +16,7 @@ use rusoto_s3::S3Client;
 use tokio;
 
 use backend::audio;
+use backend::config::get_variable;
 use backend::routes::make_upload_route;
 use backend::store::S3Store;
 
@@ -72,8 +73,4 @@ fn initialize_logger() -> slog::Logger {
     let drain = Async::new(drain).build().fuse();
 
     Logger::root(drain, o!("version" => env!("CARGO_PKG_VERSION")))
-}
-
-fn get_variable(name: &str) -> String {
-    env::var(name).expect(&format!("must define {} environment variable", name))
 }
