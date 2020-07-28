@@ -205,47 +205,18 @@ fn parse_parts(parts: &mut Vec<Part>) -> Result<Upload, BackendError> {
 
 #[cfg(test)]
 mod test {
-    use std::collections::HashMap;
     use std::path::Path;
-    use std::sync::RwLock;
 
-    use futures::future::BoxFuture;
     use serde::Deserialize;
 
     use crate::errors;
-    use crate::store::Store;
+    use crate::store::mock::MockStore;
 
     #[derive(Debug, Deserialize)]
     #[serde(deny_unknown_fields)]
     struct Reply {
         status: String,
         key: Option<String>,
-    }
-
-    #[derive(Default)]
-    struct MockStore {
-        map: RwLock<HashMap<String, Vec<u8>>>,
-    }
-
-    impl Store for MockStore {
-        type Output = ();
-        type Raw = Vec<u8>;
-
-        fn save(&self, key: String, raw: Vec<u8>) -> BoxFuture<Result<(), errors::StoreError>> {
-            use futures::FutureExt;
-
-            mock_save(&self, key, raw).boxed()
-        }
-    }
-
-    async fn mock_save(
-        store: &MockStore,
-        key: String,
-        raw: Vec<u8>,
-    ) -> Result<(), errors::StoreError> {
-        store.map.write().unwrap().insert(key, raw);
-
-        Ok(())
     }
 
     #[test]

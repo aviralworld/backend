@@ -5,6 +5,8 @@ use rusoto_s3::{PutObjectRequest, S3Client, StreamingBody, S3};
 
 use crate::errors::StoreError;
 
+pub mod mock;
+
 pub trait Store: Send + Sync {
     /// The type of successful result.
     type Output;
