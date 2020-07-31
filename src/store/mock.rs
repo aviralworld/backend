@@ -7,8 +7,8 @@ use crate::errors;
 use crate::store::Store;
 
 #[derive(Default)]
-pub struct MockStore {
-    map: RwLock<HashMap<String, Vec<u8>>>,
+pub(crate) struct MockStore {
+    pub(crate) map: RwLock<HashMap<String, Vec<u8>>>,
 }
 
 impl Store for MockStore {
