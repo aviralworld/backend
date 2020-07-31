@@ -9,10 +9,12 @@ pub struct Recording {
     /// The ID of the recording.
     id: Uuid,
 
+    /// The URL of the file.
+    url: Url,
+
+    /// The user-submitted metadata.
     #[serde(flatten)]
     metadata: RecordingMetadata,
-
-    url: Url,
 }
 
 /// A single recording in the database before it's uploaded.
@@ -21,6 +23,7 @@ pub struct NewRecording {
     /// The ID of the recording.
     id: Uuid,
 
+    /// The user-submitted metadata.
     #[serde(flatten)]
     metadata: RecordingMetadata,
 }
@@ -61,7 +64,10 @@ pub struct RecordingMetadata {
     pub(crate) occupation: Option<String>,
 
     /// The date and time it was created.
-    pub(crate) created: OffsetDateTime,
+    pub(crate) created_at: OffsetDateTime,
+
+    /// The date and time it was last modified.
+    pub(crate) updated_at: OffsetDateTime,
 
     /// The ID of the recording it follows, if any.
     pub(crate) parent: Option<Uuid>,
