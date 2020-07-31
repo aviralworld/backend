@@ -1,1 +1,1 @@
-UPDATE recordings SET unlisted = $2 WHERE id = $1;
+UPDATE recordings SET unlisted = $2, updated_at = NOW() WHERE id = $1;
