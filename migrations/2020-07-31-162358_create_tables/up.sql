@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS "recordings" (
     updated_at timestamp with time zone NOT NULL DEFAULT NOW(),
     category smallint NOT NULL REFERENCES "categories" (id),
     unlisted boolean NOT NULL,
+    parent_id uuid REFERENCES "recordings" (id),
     name text NOT NULL,
     age smallint REFERENCES "ages" (id),
     gender smallint REFERENCES "genders" (id),
