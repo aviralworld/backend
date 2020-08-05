@@ -28,7 +28,7 @@ impl Store for MockStore {
     type Output = ();
     type Raw = Vec<u8>;
 
-    fn save(&self, key: String, raw: Vec<u8>) -> BoxFuture<Result<(), errors::StoreError>> {
+    fn save(&self, key: String, raw: Vec<u8>) -> BoxFuture<Result<(), errors::BackendError>> {
         use futures::FutureExt;
 
         mock_save(&self, key, raw).boxed()
@@ -43,7 +43,7 @@ impl Store for MockStore {
     }
 }
 
-async fn mock_save(store: &MockStore, key: String, raw: Vec<u8>) -> Result<(), errors::StoreError> {
+async fn mock_save(store: &MockStore, key: String, raw: Vec<u8>) -> Result<(), errors::BackendError> {
     store.map.write().unwrap().insert(key, raw);
 
     Ok(())

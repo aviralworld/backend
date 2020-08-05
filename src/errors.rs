@@ -54,11 +54,7 @@ pub enum BackendError {
     /// Represents an error caused by the user uploading a media file with too many streams.
     #[error("too many streams: should be {0}, was {1}")]
     TooManyStreams(usize, usize),
-}
 
-/// Enumerates errors returned by the store subsystem.
-#[derive(Debug, Error)]
-pub enum StoreError {
     /// Represents an error returned when parsing the content to upload.
     #[error("failed to parse form submission")]
     MalformedFormSubmission,
@@ -72,14 +68,6 @@ impl reject::Reject for BackendError {}
 
 impl From<BackendError> for reject::Rejection {
     fn from(e: BackendError) -> Self {
-        warp::reject::custom(e)
-    }
-}
-
-impl reject::Reject for StoreError {}
-
-impl From<StoreError> for reject::Rejection {
-    fn from(e: StoreError) -> Self {
         warp::reject::custom(e)
     }
 }

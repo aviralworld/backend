@@ -14,7 +14,7 @@ use warp::reply::{json, with_status, Json, Reply, WithStatus};
 use warp::Filter;
 
 use crate::db::Db;
-use crate::errors::{BackendError, StoreError};
+use crate::errors::BackendError;
 use crate::recording::RecordingMetadata;
 use crate::store::Store;
 
@@ -82,16 +82,30 @@ async fn process_upload<O>(
     checker: Arc<impl Fn(&[u8]) -> Result<(), BackendError>>,
     content: FormData,
 ) -> Result<WithStatus<Json>, reject::Rejection> {
-    use crate::io;
+    let upload = parse_upload(logger.clone(), content).await?;
+    let id = save_recording_metadata(logger.clone(), db.clone(), upload.metadata).await?;
+    save_upload_audio(logger, db, store, checker, &id, upload.audio).await.map_err(warp::reject::custom)
+}
 
+async fn parse_upload(logger: Arc<Logger>, content: FormData) -> Result<Upload, BackendError> {
     let mut parts = collect_parts(content).await?;
     debug!(logger, "collected parts");
-    let upload = parse_parts(&mut parts).map_err(reject::custom)?;
+    let upload = parse_parts(&mut parts)?;
     debug!(logger, "parsed parts");
 
-    let raw_metadata = io::part_as_vec(upload.metadata)
+    Ok(upload)
+}
+
+async fn save_recording_metadata(
+    logger: Arc<Logger>,
+    db: Arc<impl Db>,
+    metadata: Part,
+) -> Result<Uuid, reject::Rejection> {
+    use crate::io;
+
+    let raw_metadata = io::part_as_vec(metadata)
         .await
-        .map_err(|_| StoreError::MalformedFormSubmission)?;
+        .map_err(|_| BackendError::MalformedFormSubmission)?;
     let metadata: RecordingMetadata = serde_json::from_slice(&raw_metadata)
         .map_err(|e| reject::custom(BackendError::MalformedUploadMetadata(e)))?;
 
@@ -102,7 +116,7 @@ async fn process_upload<O>(
 
     debug!(logger, "got ID of inserted row"; "id" => &format!("{}", id));
 
-    save_upload_audio(logger, db, store, checker, id, upload.audio).await
+    Ok(*id)
 }
 
 async fn save_upload_audio<O>(
@@ -112,14 +126,14 @@ async fn save_upload_audio<O>(
     checker: Arc<impl Fn(&[u8]) -> Result<(), BackendError>>,
     key: &Uuid,
     upload: Part,
-) -> Result<WithStatus<Json>, reject::Rejection> {
+) -> Result<WithStatus<Json>, BackendError> {
     use crate::io;
 
     let audio_data = io::part_as_vec(upload)
         .await
-        .map_err(|_| reject::custom(StoreError::MalformedFormSubmission))?;
+        .map_err(|_| BackendError::MalformedFormSubmission)?;
 
-    checker(&audio_data).map_err(reject::custom)?;
+    checker(&audio_data)?;
 
     debug!(logger, "verified audio codec");
 

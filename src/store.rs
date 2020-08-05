@@ -4,7 +4,7 @@ use futures::future::{BoxFuture, FutureExt};
 use rusoto_s3::{PutObjectRequest, S3Client, StreamingBody, S3};
 use url::{ParseError, Url};
 
-use crate::errors::StoreError;
+use crate::errors::BackendError;
 
 pub mod mock;
 
@@ -16,7 +16,7 @@ pub trait Store: Send + Sync {
     type Raw;
 
     /// Saves the given data under the given key.
-    fn save(&self, key: String, raw: Self::Raw) -> BoxFuture<Result<Self::Output, StoreError>>;
+    fn save(&self, key: String, raw: Self::Raw) -> BoxFuture<Result<Self::Output, BackendError>>;
 
     fn get_url(&self, key: impl AsRef<str>) -> Result<Url, ParseError>;
 }
@@ -59,7 +59,7 @@ impl Store for S3Store {
     type Output = ();
     type Raw = Vec<u8>;
 
-    fn save(&self, key: String, raw: Vec<u8>) -> BoxFuture<Result<(), StoreError>> {
+    fn save(&self, key: String, raw: Vec<u8>) -> BoxFuture<Result<(), BackendError>> {
         upload(self, key, raw).boxed()
     }
 
@@ -69,7 +69,7 @@ impl Store for S3Store {
     }
 }
 
-async fn upload(store: &S3Store, key: String, raw: Vec<u8>) -> Result<(), StoreError> {
+async fn upload(store: &S3Store, key: String, raw: Vec<u8>) -> Result<(), BackendError> {
     use std::convert::TryFrom;
 
     let len = i64::try_from(raw.len()).expect("raw data length must be within range of i64");
@@ -89,6 +89,6 @@ async fn upload(store: &S3Store, key: String, raw: Vec<u8>) -> Result<(), StoreE
 
     match result {
         Ok(_) => Ok(()),
-        Err(e) => Err(StoreError::UploadFailed { source: e }),
+        Err(e) => Err(BackendError::UploadFailed { source: e }),
     }
 }
