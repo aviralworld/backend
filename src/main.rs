@@ -1,19 +1,20 @@
+use std::env;
 use std::error::Error;
 use std::sync::Arc;
-use std::env;
 use std::sync::Mutex;
 
-use slog::Drain;
-use slog_async;
-use slog_json;
 use dotenv;
 use pretty_env_logger;
 use rusoto_core::request::HttpClient;
 use rusoto_core::Region;
 use rusoto_credential::StaticProvider;
 use rusoto_s3::S3Client;
+use slog::Drain;
+use slog_async;
+use slog_json;
 use sqlx;
 use tokio;
+use url::Url;
 
 use backend::audio;
 use backend::config::get_variable;
@@ -44,7 +45,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
         region,
     ));
 
-    let store = S3Store::new(client, acl, bucket, cache_control, content_type);
+    let base_url = Url::parse(&get_variable("S3_BASE_URL")).expect("parse S3_BASE_URL");
+    let extension = get_variable("BACKEND_MEDIA_EXTENSION");
+
+    let store = S3Store::new(
+        client,
+        acl,
+        bucket,
+        cache_control,
+        content_type,
+        base_url,
+        extension,
+    );
 
     let enable_warp_logging = get_variable("BACKEND_ENABLE_WARP_LOGGING");
 
@@ -55,11 +67,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let logger = Arc::new(initialize_logger());
 
     let ffprobe_path = env::var("BACKEND_FFPROBE_PATH").ok();
-    let expected_codec = get_variable("BACKEND_CODEC");
-    let checker = audio::make_wrapper(ffprobe_path, expected_codec);
+    let expected_codec = get_variable("BACKEND_MEDIA_CODEC");
+    let expected_format = get_variable("BACKEND_MEDIA_FORMAT");
+    let checker = audio::make_wrapper(ffprobe_path, expected_codec, expected_format);
 
     let connection_string = get_variable("BACKEND_DB_CONNECTION_STRING");
-    let pool = sqlx::Pool::new(&connection_string).await.expect("create database pool from BACKEND_DB_CONNECTION_STRING");
+    let pool = sqlx::Pool::new(&connection_string)
+        .await
+        .expect("create database pool from BACKEND_DB_CONNECTION_STRING");
     let db = PgDb::new(pool);
 
     let routes = make_upload_route(logger, Arc::new(db), Arc::new(store), Arc::new(checker));
