@@ -25,6 +25,7 @@ pub struct S3Store {
     bucket: String,
     cache_control: String,
     content_type: String,
+    extension: String,
 }
 
 impl S3Store {
@@ -35,6 +36,7 @@ impl S3Store {
         bucket: String,
         cache_control: String,
         content_type: String,
+        extension: String,
     ) -> Self {
         Self {
             client,
@@ -42,6 +44,7 @@ impl S3Store {
             bucket,
             cache_control,
             content_type,
+            extension,
         }
     }
 }

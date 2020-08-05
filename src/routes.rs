@@ -167,7 +167,7 @@ fn status_code_for(e: &BackendError) -> StatusCode {
 
     match e {
         BadRequest | TooManyStreams(..) => StatusCode::BAD_REQUEST,
-        WrongMediaType(..) => StatusCode::UNSUPPORTED_MEDIA_TYPE,
+        WrongMediaType { .. } => StatusCode::UNSUPPORTED_MEDIA_TYPE,
         PartsMissing => StatusCode::BAD_REQUEST,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     }
@@ -241,9 +241,7 @@ mod test {
 
         let content_type = multipart_content_type(&BOUNDARY);
 
-        let store = MockStore {
-            ..Default::default()
-        };
+        let store = MockStore::new("ogg");
 
         // TODO this should be slog::Discard /unless/ the environment
         // variable `BACKEND_TEST_LOGGING` is `1`
@@ -317,9 +315,7 @@ mod test {
 
         initialize_global_logger();
 
-        let store = MockStore {
-            ..Default::default()
-        };
+        let store = MockStore::new("ogg");
 
         //let logger = slog::Logger::root(slog::Discard, slog::o!());
         let logger = slog_scope::logger();
@@ -385,7 +381,8 @@ mod test {
 
         audio::make_wrapper(
             env::var("BACKEND_FFPROBE_PATH").ok(),
-            env::var("BACKEND_CODEC").expect("must define BACKEND_CODEC environment variable"),
+            env::var("BACKEND_MEDIA_CODEC").expect("must define BACKEND_MEDIA_CODEC environment variable"),
+            env::var("BACKEND_MEDIA_FORMAT").expect("must define BACKEND_MEDIA_FORMAT environment variable"),
         )
     }
 

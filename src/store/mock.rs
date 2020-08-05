@@ -9,6 +9,16 @@ use crate::store::Store;
 #[derive(Default)]
 pub(crate) struct MockStore {
     pub(crate) map: RwLock<HashMap<String, Vec<u8>>>,
+    extension: String,
+}
+
+impl MockStore {
+    pub fn new(extension: impl AsRef<str>) -> Self {
+        MockStore {
+            extension: extension.as_ref().to_owned(),
+            ..Default::default()
+        }
+    }
 }
 
 impl Store for MockStore {

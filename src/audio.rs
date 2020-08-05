@@ -1,7 +1,7 @@
 use crate::errors::BackendError;
 
 pub trait CodecChecker {
-    fn check_codec(&self, data: &[u8], expected_codec: &str) -> Result<(), BackendError>;
+    fn check_codec(&self, data: &[u8], expected_codec: &str, expected_format: &str) -> Result<(), BackendError>;
 
     fn new(ffprobe_path: Option<String>) -> Self;
 }
@@ -9,11 +9,12 @@ pub trait CodecChecker {
 pub fn make_wrapper(
     ffprobe_path: Option<String>,
     expected_codec: String,
+    expected_format: String,
 ) -> impl Fn(&[u8]) -> Result<(), BackendError> {
     let checker = inner::Checker::new(ffprobe_path);
     let expected_codec = expected_codec;
 
-    move |data: &[u8]| checker.check_codec(data, &expected_codec).map(|_| ())
+    move |data: &[u8]| checker.check_codec(data, &expected_codec, &expected_format).map(|_| ())
 }
 
 #[cfg(not(use_ffmpeg_sys))]
@@ -33,6 +34,7 @@ mod inner {
             OsString::from("error"),
             OsString::from("-of"),
             OsString::from("json"),
+            OsString::from("-show_format"),
             OsString::from("-show_entries"),
             OsString::from("stream=codec_name"),
         ];
@@ -45,6 +47,7 @@ mod inner {
     #[derive(Deserialize)]
     struct FfprobeOutput {
         streams: Vec<FfprobeStream>,
+        format: FfprobeFormat,
     }
 
     #[derive(Deserialize)]
@@ -52,10 +55,15 @@ mod inner {
         codec_name: String,
     }
 
+    #[derive(Deserialize)]
+    struct FfprobeFormat {
+        format_name: String,
+    }
+
     impl Checker {}
 
     impl super::CodecChecker for Checker {
-        fn check_codec(&self, data: &[u8], expected_codec: &str) -> Result<(), BackendError> {
+        fn check_codec(&self, data: &[u8], expected_codec: &str, expected_format: &str) -> Result<(), BackendError> {
             use std::io::Write;
             use std::process::Command;
 
@@ -87,17 +95,23 @@ mod inner {
 
             let stream = streams.first().unwrap();
             let codec = &stream.codec_name;
+            let format = &parsed.format.format_name;
 
             eprintln!(
-                "comparing actual {:?} to expected {:?}",
-                codec, expected_codec
+                "comparing actual {:?} inside {:?} to expected {:?} inside {:?}",
+                codec, format, expected_codec, expected_format
             );
 
-            if codec == expected_codec {
+            if codec == expected_codec && format == expected_format {
                 return Ok(());
             }
 
-            Err(BackendError::WrongMediaType(expected_codec.to_owned()))
+            Err(BackendError::WrongMediaType {
+                actual_codec: codec.to_owned(),
+                expected_codec: expected_codec.to_owned(),
+                actual_format: format.to_owned(),
+                expected_format: expected_format.to_owned()
+            })
         }
 
         fn new(path: Option<String>) -> Self {
