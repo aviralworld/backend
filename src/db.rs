@@ -8,7 +8,7 @@ use crate::recording::{NewRecording, RecordingMetadata};
 pub trait Db {
     fn insert(&self, metadata: RecordingMetadata) -> BoxFuture<Result<NewRecording, BackendError>>;
 
-    fn update_url(&self, id: Uuid, url: Url) -> BoxFuture<Result<(), BackendError>>;
+    fn update_url(&self, id: &Uuid, url: &Url) -> BoxFuture<Result<(), BackendError>>;
 }
 
 pub use self::postgres::*;
@@ -44,8 +44,8 @@ mod postgres {
             insert(metadata, &self.pool).boxed()
         }
 
-        fn update_url(&self, id: Uuid, url: Url) -> BoxFuture<Result<(), BackendError>> {
-            update_url(id, url, &self.pool).boxed()
+        fn update_url(&self, id: &Uuid, url: &Url) -> BoxFuture<Result<(), BackendError>> {
+            update_url(id.clone(), url.clone(), &self.pool).boxed()
         }
     }
 

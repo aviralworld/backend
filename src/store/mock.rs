@@ -5,6 +5,7 @@ use std::sync::RwLock;
 
 use futures::future::BoxFuture;
 use url::{ParseError, Url};
+use uuid::Uuid;
 
 use crate::errors;
 use crate::store::Store;
@@ -28,23 +29,23 @@ impl Store for MockStore {
     type Output = ();
     type Raw = Vec<u8>;
 
-    fn save(&self, key: String, raw: Vec<u8>) -> BoxFuture<Result<(), errors::BackendError>> {
+    fn save(&self, key: &Uuid, raw: Vec<u8>) -> BoxFuture<Result<(), errors::BackendError>> {
         use futures::FutureExt;
 
-        mock_save(&self, key, raw).boxed()
+        mock_save(&self, key.clone(), raw).boxed()
     }
 
-    fn get_url(&self, key: impl AsRef<str>) -> Result<Url, ParseError> {
+    fn get_url(&self, key: &Uuid) -> Result<Url, ParseError> {
         Url::parse(&format!(
             "https://www.example.com/{}.{}",
-            key.as_ref(),
+            format!("{}", key),
             self.extension
         ))
     }
 }
 
-async fn mock_save(store: &MockStore, key: String, raw: Vec<u8>) -> Result<(), errors::BackendError> {
-    store.map.write().unwrap().insert(key, raw);
+async fn mock_save(store: &MockStore, key: Uuid, raw: Vec<u8>) -> Result<(), errors::BackendError> {
+    store.map.write().unwrap().insert(format!("{}", key), raw);
 
     Ok(())
 }

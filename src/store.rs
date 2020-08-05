@@ -3,6 +3,7 @@ use std::sync::Arc;
 use futures::future::{BoxFuture, FutureExt};
 use rusoto_s3::{PutObjectRequest, S3Client, StreamingBody, S3};
 use url::{ParseError, Url};
+use uuid::Uuid;
 
 use crate::errors::BackendError;
 
@@ -16,9 +17,9 @@ pub trait Store: Send + Sync {
     type Raw;
 
     /// Saves the given data under the given key.
-    fn save(&self, key: String, raw: Self::Raw) -> BoxFuture<Result<Self::Output, BackendError>>;
+    fn save(&self, key: &Uuid, raw: Self::Raw) -> BoxFuture<Result<Self::Output, BackendError>>;
 
-    fn get_url(&self, key: impl AsRef<str>) -> Result<Url, ParseError>;
+    fn get_url(&self, key: &Uuid) -> Result<Url, ParseError>;
 }
 
 /// A store that saves its data to S3.
@@ -59,17 +60,17 @@ impl Store for S3Store {
     type Output = ();
     type Raw = Vec<u8>;
 
-    fn save(&self, key: String, raw: Vec<u8>) -> BoxFuture<Result<(), BackendError>> {
-        upload(self, key, raw).boxed()
+    fn save<'a>(&self, key: &Uuid, raw: Vec<u8>) -> BoxFuture<Result<(), BackendError>> {
+        upload(self, key.clone(), raw).boxed()
     }
 
-    fn get_url(&self, key: impl AsRef<str>) -> Result<Url, ParseError> {
+    fn get_url<'a>(&self, key: &'a Uuid) -> Result<Url, ParseError> {
         self.base_url
-            .join(&format!("{}.{}", key.as_ref(), self.extension))
+            .join(&format!("{}.{}", key, self.extension))
     }
 }
 
-async fn upload(store: &S3Store, key: String, raw: Vec<u8>) -> Result<(), BackendError> {
+async fn upload(store: &S3Store, key: Uuid, raw: Vec<u8>) -> Result<(), BackendError> {
     use std::convert::TryFrom;
 
     let len = i64::try_from(raw.len()).expect("raw data length must be within range of i64");
@@ -81,7 +82,7 @@ async fn upload(store: &S3Store, key: String, raw: Vec<u8>) -> Result<(), Backen
         cache_control: Some(store.cache_control.clone()),
         content_length: Some(len),
         content_type: Some(store.content_type.clone()),
-        key,
+        key: format!("{}", key),
         ..Default::default()
     };
 

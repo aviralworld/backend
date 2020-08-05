@@ -6,6 +6,7 @@ use futures::{
 };
 use serde::{Deserialize, Serialize};
 use slog::{debug, error, Logger};
+use url::Url;
 use uuid::Uuid;
 use warp::filters::multipart::{form, FormData, Part};
 use warp::http::StatusCode;
@@ -60,8 +61,6 @@ pub fn make_upload_route<'a, O: 'a>(
         .and(form().max_length(MAX_CONTENT_LENGTH))
         .and_then(
             move |content: FormData| -> BoxFuture<Result<WithStatus<Json>, reject::Rejection>> {
-                debug!(logger1, "recording submitted");
-
                 process_upload(
                     logger1.clone(),
                     db.clone(),
@@ -82,22 +81,58 @@ async fn process_upload<O>(
     checker: Arc<impl Fn(&[u8]) -> Result<(), BackendError>>,
     content: FormData,
 ) -> Result<WithStatus<Json>, reject::Rejection> {
+    debug!(logger, "Parsing submission...");
     let upload = parse_upload(logger.clone(), content).await?;
+    debug!(logger, "Verifying audio contents...");
+    let verified_audio = verify_audio(logger.clone(), checker, upload.audio).await?;
+
+    debug!(logger, "Writing metadata to database...");
     let id = save_recording_metadata(logger.clone(), db.clone(), upload.metadata).await?;
-    save_upload_audio(logger, db, store, checker, &id, upload.audio).await.map_err(warp::reject::custom)
+    let id_as_str = format!("{}", id);
+    let logger = Arc::new(logger.new(slog::o!("id" => id_as_str.clone())));
+
+    debug!(logger, "Saving recording to store...");
+    save_upload_audio(logger.clone(), store.clone(), &id, verified_audio)
+        .await
+        .map_err(warp::reject::custom)?;
+
+    debug!(logger, "Updating recording URL...");
+    update_recording_url(logger.clone(), db.clone(), store.clone(), &id).await?;
+
+    debug!(logger, "Sending response...");
+    let response = StorageResponse {
+        status: Response::Ok,
+        key: Some(id_as_str.clone()),
+    };
+
+    Ok(with_status(json(&response), StatusCode::OK))
 }
 
-async fn parse_upload(logger: Arc<Logger>, content: FormData) -> Result<Upload, BackendError> {
+async fn parse_upload(_logger: Arc<Logger>, content: FormData) -> Result<Upload, BackendError> {
     let mut parts = collect_parts(content).await?;
-    debug!(logger, "collected parts");
     let upload = parse_parts(&mut parts)?;
-    debug!(logger, "parsed parts");
 
     Ok(upload)
 }
 
+async fn verify_audio(
+    _logger: Arc<Logger>,
+    checker: Arc<impl Fn(&[u8]) -> Result<(), BackendError>>,
+    audio: Part,
+) -> Result<Vec<u8>, BackendError> {
+    use crate::io;
+
+    let audio_data = io::part_as_vec(audio)
+        .await
+        .map_err(|_| BackendError::MalformedFormSubmission)?;
+
+    checker(&audio_data)?;
+
+    Ok(audio_data)
+}
+
 async fn save_recording_metadata(
-    logger: Arc<Logger>,
+    _logger: Arc<Logger>,
     db: Arc<impl Db>,
     metadata: Part,
 ) -> Result<Uuid, reject::Rejection> {
@@ -109,68 +144,36 @@ async fn save_recording_metadata(
     let metadata: RecordingMetadata = serde_json::from_slice(&raw_metadata)
         .map_err(|e| reject::custom(BackendError::MalformedUploadMetadata(e)))?;
 
-    debug!(logger, "parsed upload metadata");
-
     let new_recording = db.insert(metadata).await?;
     let id = new_recording.id();
-
-    debug!(logger, "got ID of inserted row"; "id" => &format!("{}", id));
 
     Ok(*id)
 }
 
 async fn save_upload_audio<O>(
-    logger: Arc<Logger>,
+    _logger: Arc<Logger>,
+    store: Arc<impl Store<Output = O, Raw = Vec<u8>>>,
+    key: &Uuid,
+    upload: Vec<u8>,
+) -> Result<(), BackendError> {
+    store.save(key, upload).await?;
+
+    Ok(())
+}
+
+async fn update_recording_url<O>(
+    _logger: Arc<Logger>,
     db: Arc<impl Db>,
     store: Arc<impl Store<Output = O, Raw = Vec<u8>>>,
-    checker: Arc<impl Fn(&[u8]) -> Result<(), BackendError>>,
     key: &Uuid,
-    upload: Part,
-) -> Result<WithStatus<Json>, BackendError> {
-    use crate::io;
+) -> Result<Url, BackendError> {
+    let url = store
+        .get_url(&key)
+        .map_err(|e| BackendError::FailedToGenerateUrl { source: e })?;
 
-    let audio_data = io::part_as_vec(upload)
-        .await
-        .map_err(|_| BackendError::MalformedFormSubmission)?;
+    db.update_url(key, &url).await?;
 
-    checker(&audio_data)?;
-
-    debug!(logger, "verified audio codec");
-
-    {
-        let key_as_str = format!("{}", key);
-        let logger = logger.new(slog::o!("key" => key_as_str.clone()));
-        debug!(logger, "generated key");
-
-        store
-            .save(key_as_str.clone(), audio_data)
-            .await
-            .map_err(|x| {
-                error!(logger, "Failed to save"; "error" => format!("{:?}", x));
-                x
-            })?;
-
-        debug!(logger, "saved object");
-
-        let url = store.get_url(&key_as_str).map_err(|x| {
-            error!(logger, "Couldn't generate URL"; "error" => format!("{:?}", x));
-            BackendError::FailedToGenerateUrl(x)
-        })?;
-
-        debug!(logger, "generated URL"; "url" => url.as_str());
-
-        db.update_url(*key, url).await.map_err(|x| {
-            error!(logger, "Failed to update URL"; "error" => format!("{:?}", x));
-            x
-        })?;
-
-        let response = StorageResponse {
-            status: Response::Ok,
-            key: Some(key_as_str.clone()),
-        };
-
-        Ok(with_status(json(&response), StatusCode::OK))
-    }
+    Ok(url)
 }
 
 async fn format_rejection(
@@ -308,8 +311,6 @@ mod test {
 
         let status = response.status();
         let body = String::from_utf8_lossy(response.body()).into_owned();
-
-        slog::debug!(logger_arc.as_ref(), "got response"; "body" => &body);
 
         assert!(status.is_success());
 
