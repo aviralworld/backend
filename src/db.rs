@@ -14,8 +14,8 @@ pub trait Db {
 pub use self::postgres::*;
 
 mod postgres {
-    use futures::FutureExt;
     use futures::future::BoxFuture;
+    use futures::FutureExt;
     use sqlx::{self, postgres::PgPool, Postgres, QueryAs};
     use time::OffsetDateTime;
     use url::Url;
@@ -45,7 +45,7 @@ mod postgres {
         }
 
         fn update_url(&self, id: Uuid, url: Url) -> BoxFuture<Result<(), BackendError>> {
-           update_url(id, url, &self.pool).boxed()
+            update_url(id, url, &self.pool).boxed()
         }
     }
 
@@ -55,7 +55,8 @@ mod postgres {
     ) -> Result<NewRecording, BackendError> {
         use sqlx::prelude::*;
 
-        let query: QueryAs<Postgres, (Uuid, OffsetDateTime, OffsetDateTime)> = sqlx::query_as(include_str!("queries/create.sql"));
+        let query: QueryAs<Postgres, (Uuid, OffsetDateTime, OffsetDateTime)> =
+            sqlx::query_as(include_str!("queries/create.sql"));
 
         let (id, created_at, updated_at) = query
             .bind(&DEFAULT_URL)

@@ -145,12 +145,10 @@ async fn process_upload_audio<O>(
 
         debug!(logger, "generated URL"; "url" => url.as_str());
 
-        db.update_url(*key, url)
-            .await
-            .map_err(|x| {
-                error!(logger, "Failed to update URL"; "error" => format!("{:?}", x));
-                x
-            })?;
+        db.update_url(*key, url).await.map_err(|x| {
+            error!(logger, "Failed to update URL"; "error" => format!("{:?}", x));
+            x
+        })?;
 
         let response = StorageResponse {
             status: Response::Ok,
@@ -290,14 +288,9 @@ mod test {
 
         let body = fs::read("tests/simple_metadata.json").expect("read simple_metadata.json");
 
-        let response = upload_file(
-            &file_path,
-            &content_type,
-            BOUNDARY.as_bytes(),
-            &body,
-        )
-        .reply(&filter)
-        .await;
+        let response = upload_file(&file_path, &content_type, BOUNDARY.as_bytes(), &body)
+            .reply(&filter)
+            .await;
 
         let status = response.status();
         let body = String::from_utf8_lossy(response.body()).into_owned();
@@ -369,9 +362,7 @@ mod test {
     const BOUNDARY_LEADER: &[u8] = &[b'-', b'-'];
 
     fn initialize_global_logger() {
-        SLOG_SCOPE_GUARD.get_or_init(|| {
-            slog_envlogger::init().expect("initialize slog-envlogger")
-        });
+        SLOG_SCOPE_GUARD.get_or_init(|| slog_envlogger::init().expect("initialize slog-envlogger"));
     }
 
     fn upload_file(
@@ -397,8 +388,10 @@ mod test {
 
         audio::make_wrapper(
             env::var("BACKEND_FFPROBE_PATH").ok(),
-            env::var("BACKEND_MEDIA_CODEC").expect("must define BACKEND_MEDIA_CODEC environment variable"),
-            env::var("BACKEND_MEDIA_FORMAT").expect("must define BACKEND_MEDIA_FORMAT environment variable"),
+            env::var("BACKEND_MEDIA_CODEC")
+                .expect("must define BACKEND_MEDIA_CODEC environment variable"),
+            env::var("BACKEND_MEDIA_FORMAT")
+                .expect("must define BACKEND_MEDIA_FORMAT environment variable"),
         )
     }
 

@@ -37,7 +37,12 @@ pub struct NewRecording {
 }
 
 impl NewRecording {
-    pub fn new(id: Uuid, created_at: OffsetDateTime, updated_at: OffsetDateTime, metadata: RecordingMetadata) -> Self {
+    pub fn new(
+        id: Uuid,
+        created_at: OffsetDateTime,
+        updated_at: OffsetDateTime,
+        metadata: RecordingMetadata,
+    ) -> Self {
         NewRecording {
             id,
             metadata,

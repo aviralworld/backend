@@ -33,7 +33,11 @@ impl Store for MockStore {
     }
 
     fn get_url(&self, key: impl AsRef<str>) -> Result<Url, ParseError> {
-        Url::parse(&format!("https://www.example.com/{}.{}", key.as_ref(), self.extension))
+        Url::parse(&format!(
+            "https://www.example.com/{}.{}",
+            key.as_ref(),
+            self.extension
+        ))
     }
 }
 

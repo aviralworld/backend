@@ -1,7 +1,12 @@
 use crate::errors::BackendError;
 
 pub trait CodecChecker {
-    fn check_codec(&self, data: &[u8], expected_codec: &str, expected_format: &str) -> Result<(), BackendError>;
+    fn check_codec(
+        &self,
+        data: &[u8],
+        expected_codec: &str,
+        expected_format: &str,
+    ) -> Result<(), BackendError>;
 
     fn new(ffprobe_path: Option<String>) -> Self;
 }
@@ -14,7 +19,11 @@ pub fn make_wrapper(
     let checker = inner::Checker::new(ffprobe_path);
     let expected_codec = expected_codec;
 
-    move |data: &[u8]| checker.check_codec(data, &expected_codec, &expected_format).map(|_| ())
+    move |data: &[u8]| {
+        checker
+            .check_codec(data, &expected_codec, &expected_format)
+            .map(|_| ())
+    }
 }
 
 #[cfg(not(use_ffmpeg_sys))]
@@ -63,7 +72,12 @@ mod inner {
     impl Checker {}
 
     impl super::CodecChecker for Checker {
-        fn check_codec(&self, data: &[u8], expected_codec: &str, expected_format: &str) -> Result<(), BackendError> {
+        fn check_codec(
+            &self,
+            data: &[u8],
+            expected_codec: &str,
+            expected_format: &str,
+        ) -> Result<(), BackendError> {
             use std::io::Write;
             use std::process::Command;
 
@@ -110,7 +124,7 @@ mod inner {
                 actual_codec: codec.to_owned(),
                 expected_codec: expected_codec.to_owned(),
                 actual_format: format.to_owned(),
-                expected_format: expected_format.to_owned()
+                expected_format: expected_format.to_owned(),
             })
         }
 

@@ -44,7 +44,12 @@ pub enum BackendError {
 
     /// Represents an error caused by the user uploading a media file of the wrong kind.
     #[error("wrong media type (should be {expected_codec} inside {expected_format}; was {actual_codec} inside {actual_format})")]
-    WrongMediaType { actual_codec: String, expected_codec: String, actual_format: String, expected_format: String },
+    WrongMediaType {
+        actual_codec: String,
+        expected_codec: String,
+        actual_format: String,
+        expected_format: String,
+    },
 
     /// Represents an error caused by the user uploading a media file with too many streams.
     #[error("too many streams: should be {0}, was {1}")]

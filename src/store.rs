@@ -64,7 +64,8 @@ impl Store for S3Store {
     }
 
     fn get_url(&self, key: impl AsRef<str>) -> Result<Url, ParseError> {
-        self.base_url.join(&format!("{}.{}", key.as_ref(), self.extension))
+        self.base_url
+            .join(&format!("{}.{}", key.as_ref(), self.extension))
     }
 }
 
