@@ -18,7 +18,7 @@ pub struct Recording {
 
     /// The user-submitted metadata.
     #[serde(flatten)]
-    metadata: RecordingMetadata,
+    metadata: UploadMetadata,
 }
 
 /// A single recording in the database before it's uploaded.
@@ -33,7 +33,7 @@ pub struct NewRecording {
 
     /// The user-submitted metadata.
     #[serde(flatten)]
-    metadata: RecordingMetadata,
+    metadata: UploadMetadata,
 }
 
 impl NewRecording {
@@ -41,7 +41,7 @@ impl NewRecording {
         id: Uuid,
         created_at: OffsetDateTime,
         updated_at: OffsetDateTime,
-        metadata: RecordingMetadata,
+        metadata: UploadMetadata,
     ) -> Self {
         NewRecording {
             id,
@@ -57,14 +57,14 @@ impl NewRecording {
         &self.id
     }
 
-    pub fn metadata(&self) -> &RecordingMetadata {
+    pub fn metadata(&self) -> &UploadMetadata {
         &self.metadata
     }
 }
 
 /// The metadata for a single recording.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct RecordingMetadata {
+pub struct UploadMetadata {
     /// The ID of the age group provided.
     pub(crate) age_id: Option<Id>,
 

@@ -3,10 +3,10 @@ use url::Url;
 use uuid::Uuid;
 
 use crate::errors::BackendError;
-use crate::recording::{NewRecording, RecordingMetadata};
+use crate::recording::{NewRecording, UploadMetadata};
 
 pub trait Db {
-    fn insert(&self, metadata: RecordingMetadata) -> BoxFuture<Result<NewRecording, BackendError>>;
+    fn insert(&self, metadata: UploadMetadata) -> BoxFuture<Result<NewRecording, BackendError>>;
 
     fn update_url(&self, id: &Uuid, url: &Url) -> BoxFuture<Result<(), BackendError>>;
 }
@@ -22,7 +22,7 @@ mod postgres {
     use uuid::Uuid;
 
     use crate::errors::BackendError;
-    use crate::recording::{NewRecording, RecordingMetadata};
+    use crate::recording::{NewRecording, UploadMetadata};
 
     static DEFAULT_URL: Option<String> = None;
 
@@ -39,7 +39,7 @@ mod postgres {
     impl super::Db for PgDb {
         fn insert(
             &self,
-            metadata: RecordingMetadata,
+            metadata: UploadMetadata,
         ) -> BoxFuture<Result<NewRecording, BackendError>> {
             insert(metadata, &self.pool).boxed()
         }
@@ -50,7 +50,7 @@ mod postgres {
     }
 
     async fn insert(
-        metadata: RecordingMetadata,
+        metadata: UploadMetadata,
         pool: &PgPool,
     ) -> Result<NewRecording, BackendError> {
         use sqlx::prelude::*;

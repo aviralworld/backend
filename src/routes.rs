@@ -16,7 +16,7 @@ use warp::Filter;
 
 use crate::db::Db;
 use crate::errors::BackendError;
-use crate::recording::RecordingMetadata;
+use crate::recording::UploadMetadata;
 use crate::store::Store;
 
 // create, delete, update, retrieve, count
@@ -141,7 +141,7 @@ async fn save_recording_metadata(
     let raw_metadata = io::part_as_vec(metadata)
         .await
         .map_err(|_| BackendError::MalformedFormSubmission)?;
-    let metadata: RecordingMetadata = serde_json::from_slice(&raw_metadata)
+    let metadata: UploadMetadata = serde_json::from_slice(&raw_metadata)
         .map_err(|e| reject::custom(BackendError::MalformedUploadMetadata(e)))?;
 
     let new_recording = db.insert(metadata).await?;
