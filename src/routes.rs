@@ -6,8 +6,6 @@ use futures::{
 };
 use serde::{Deserialize, Serialize};
 use slog::{debug, error, Logger};
-// use sqlx::prelude::*;
-use sqlx::postgres::PgPool;
 use uuid::Uuid;
 use warp::filters::multipart::{form, FormData, Part};
 use warp::http::StatusCode;
@@ -15,7 +13,7 @@ use warp::reject;
 use warp::reply::{json, with_status, Json, Reply, WithStatus};
 use warp::Filter;
 
-use crate::db;
+use crate::db::Db;
 use crate::errors::{BackendError, StoreError};
 use crate::recording::RecordingMetadata;
 use crate::store::Store;
@@ -44,12 +42,12 @@ const MAX_CONTENT_LENGTH: u64 = 2 * 1024 * 1024 * 1024;
 
 pub fn make_upload_route<'a, O: 'a>(
     logger: Arc<Logger>,
-    pool: Arc<PgPool>,
+    db: Arc<impl Db + Sync + Send + 'a>,
     store: Arc<impl Store<Output = O, Raw = Vec<u8>> + 'a>,
     checker: Arc<impl Fn(&[u8]) -> Result<(), BackendError> + Send + Sync + 'a>,
 ) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
     let store = store.clone();
-    let pool = pool.clone();
+    let db = db.clone();
     let logger1 = logger.clone();
     let logger2 = logger.clone();
     let checker = checker.clone();
@@ -63,7 +61,14 @@ pub fn make_upload_route<'a, O: 'a>(
             move |content: FormData| -> BoxFuture<Result<WithStatus<Json>, reject::Rejection>> {
                 debug!(logger1, "recording submitted");
 
-                process_upload(logger1.clone(), pool.clone(), store.clone(), checker.clone(), content).boxed()
+                process_upload(
+                    logger1.clone(),
+                    db.clone(),
+                    store.clone(),
+                    checker.clone(),
+                    content,
+                )
+                .boxed()
             },
         )
         .recover(move |r| format_rejection(logger2.clone(), r))
@@ -71,7 +76,7 @@ pub fn make_upload_route<'a, O: 'a>(
 
 async fn process_upload<O>(
     logger: Arc<Logger>,
-    pool: Arc<PgPool>,
+    db: Arc<impl Db>,
     store: Arc<impl Store<Output = O, Raw = Vec<u8>>>,
     checker: Arc<impl Fn(&[u8]) -> Result<(), BackendError>>,
     content: FormData,
@@ -89,12 +94,12 @@ async fn process_upload<O>(
     let metadata: RecordingMetadata = serde_json::from_slice(&raw_metadata)
         .map_err(|e| reject::custom(BackendError::MalformedUploadMetadata(e)))?;
 
-    debug!(logger, "parsed upload metadata"; metadata => &metadata);
+    debug!(logger, "parsed upload metadata");
 
-    let new_recording = db::insert_recording_metadata(metadata, &*pool).await?;
+    let new_recording = db.insert(metadata).await?;
     let id = new_recording.id();
 
-    debug!(logger, "got ID of inserted row"; id => &id);
+    debug!(logger, "got ID of inserted row"; "id" => &format!("{}", id));
 
     process_upload_audio(logger, store, checker, id, upload.audio).await
 }
@@ -205,10 +210,17 @@ fn parse_parts(parts: &mut Vec<Part>) -> Result<Upload, BackendError> {
 
 #[cfg(test)]
 mod test {
+    use std::env;
+    use std::fs;
     use std::path::Path;
+    use std::sync::Arc;
+    use std::sync::Once;
 
+    use once_cell::sync::OnceCell;
     use serde::Deserialize;
+    use slog::{self, o};
 
+    use crate::db::Db;
     use crate::errors;
     use crate::store::mock::MockStore;
 
@@ -219,53 +231,68 @@ mod test {
         key: Option<String>,
     }
 
-    #[test]
-    fn uploading_works() {
-        use std::borrow::Borrow;
-        use std::env;
-        use std::path::Path;
-        use std::sync::Arc;
+    static SLOG_SCOPE_GUARD: OnceCell<slog_scope::GlobalLoggerGuard> = OnceCell::new();
 
-        use futures::executor::block_on;
-        use slog;
+    #[tokio::test]
+    async fn uploading_works() {
+        initialize_global_logger();
 
-        let boundary = "thisisaboundary1234";
+        static BOUNDARY: &str = "thisisaboundary1234";
 
-        let content_type = multipart_content_type(&boundary);
+        let content_type = multipart_content_type(&BOUNDARY);
 
         let store = MockStore {
             ..Default::default()
         };
 
-        let logger = slog::Logger::root(slog::Discard, slog::o!());
-        let logger_arc = Arc::new(logger);
+        // TODO this should be slog::Discard /unless/ the environment
+        // variable `BACKEND_TEST_LOGGING` is `1`
+        // let logger = {
+        //     use slog::Drain;
+        //     use slog_async;
+        //     use slog_term;
+
+        //     let decorator = slog_term::TermDecorator::new().build();
+        //     let drain = slog_term::FullFormat::new(decorator).build().fuse();
+        //     Box::new(slog_async::Async::new(drain).build().fuse())
+        // };
+        // let logger = slog::Logger::root(logger, slog::o!());
+        let logger = slog_scope::logger().new(o!("test" => "uploading_works"));
+        let logger_arc = Arc::new(logger.clone());
 
         let checker = make_wrapper_for_test();
+        let db = make_db().await;
 
-        let filter =
-            super::make_upload_route(logger_arc.clone(), Arc::new(store), Arc::new(checker));
+        let filter = super::make_upload_route(
+            logger_arc.clone(),
+            Arc::new(db),
+            Arc::new(store),
+            Arc::new(checker),
+        );
 
         let cargo_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
         let base_path = Path::new(&cargo_dir);
         let file_path = base_path.join("tests").join("opus_file.ogg");
 
-        let response = block_on(
-            upload_file(
-                &file_path,
-                &content_type,
-                boundary.as_bytes(),
-                "{}".as_bytes(),
-            )
-            .reply(&filter),
-        );
+        let body = fs::read("tests/simple_metadata.json").expect("read simple_metadata.json");
+
+        let response = upload_file(
+            &file_path,
+            &content_type,
+            BOUNDARY.as_bytes(),
+            &body,
+        )
+        .reply(&filter)
+        .await;
 
         let status = response.status();
-        let body = String::from_utf8_lossy(response.body());
+        let body = String::from_utf8_lossy(response.body()).into_owned();
+
+        slog::debug!(logger_arc.as_ref(), "got response"; "body" => &body);
 
         assert!(status.is_success());
 
-        let deserialized: Reply =
-            serde_json::from_str(body.borrow()).expect("parse response as JSON");
+        let deserialized: Reply = serde_json::from_str(&body).expect("parse response as JSON");
         assert_eq!(deserialized.status, "Ok", "response status must be okay");
         assert!(
             deserialized.key.unwrap() != "",
@@ -273,9 +300,10 @@ mod test {
         );
     }
 
-    #[test]
-    fn bad_requests_fail() {
+    #[tokio::test]
+    async fn bad_requests_fail() {
         use bytes::Bytes;
+        use warp::http::StatusCode;
 
         fn assert_failed(
             response: warp::http::Response<Bytes>,
@@ -287,33 +315,34 @@ mod test {
             assert_eq!(status.as_u16(), expected_status);
         }
 
-        use std::sync::Arc;
-        use warp::http::StatusCode;
-
-        use futures::executor::block_on;
-        use slog;
+        initialize_global_logger();
 
         let store = MockStore {
             ..Default::default()
         };
 
-        let logger = slog::Logger::root(slog::Discard, slog::o!());
+        //let logger = slog::Logger::root(slog::Discard, slog::o!());
+        let logger = slog_scope::logger();
         let logger_arc = Arc::new(logger);
 
         let checker = make_wrapper_for_test();
+        let db = make_db().await;
 
-        let filter =
-            super::make_upload_route(logger_arc.clone(), Arc::new(store), Arc::new(checker));
+        let filter = super::make_upload_route(
+            logger_arc.clone(),
+            Arc::new(db),
+            Arc::new(store),
+            Arc::new(checker),
+        );
 
         {
-            let response = block_on(
-                warp::test::request()
-                    .path("/recordings/")
-                    .method("POST")
-                    .header("content-type", "text/plain")
-                    .header("content-length", 0)
-                    .reply(&filter),
-            );
+            let response = warp::test::request()
+                .path("/recordings/")
+                .method("POST")
+                .header("content-type", "text/plain")
+                .header("content-length", 0)
+                .reply(&filter)
+                .await;
 
             assert_failed(response, 400, &|s: StatusCode| s.is_client_error());
         }
@@ -327,14 +356,18 @@ mod test {
             .as_bytes();
     const BOUNDARY_LEADER: &[u8] = &[b'-', b'-'];
 
+    fn initialize_global_logger() {
+        SLOG_SCOPE_GUARD.get_or_init(|| {
+            slog_envlogger::init().expect("initialize slog-envlogger")
+        });
+    }
+
     fn upload_file(
         path: impl AsRef<Path>,
         content_type: &str,
         boundary: &[u8],
         metadata: &[u8],
     ) -> warp::test::RequestBuilder {
-        use std::fs;
-
         let data =
             fs::read(path.as_ref()).expect(&format!("read file {:?}", path.as_ref().display()));
         let body = make_multipart_body(boundary, metadata, &data);
@@ -349,12 +382,64 @@ mod test {
 
     fn make_wrapper_for_test() -> impl Fn(&[u8]) -> Result<(), errors::BackendError> {
         use crate::audio;
-        use std::env;
 
         audio::make_wrapper(
             env::var("BACKEND_FFPROBE_PATH").ok(),
             env::var("BACKEND_CODEC").expect("must define BACKEND_CODEC environment variable"),
         )
+    }
+
+    async fn make_db() -> impl Db {
+        use sqlx::Pool;
+        use tokio::task;
+
+        use crate::config::get_variable;
+        use crate::db::PgDb;
+
+        let connection_string = get_variable("BACKEND_DB_CONNECTION_STRING");
+        let pool = Pool::new(&connection_string)
+            .await
+            .expect("create PgPool from BACKEND_DB_CONNECTION_STRING");
+
+        static INITIALIZED_DB: Once = Once::new();
+
+        task::spawn_blocking(move || {
+            INITIALIZED_DB.call_once(|| {
+                let connection_string = connection_string.clone();
+
+                if env::var("BACKEND_TEST_INITIALIZE_DB").unwrap_or("0".to_owned()) == "1" {
+                    initialize_db_for_test(&connection_string);
+                }
+            });
+        })
+        .await
+        .expect("must spawn blocking task");
+
+        // use sqlx::prelude::*;
+        // slog::warn!(slog_scope::logger(), "Inserted age: {:?}", sqlx::query_as::<sqlx::Postgres, (i16, String)>("INSERT INTO ages (id, label) VALUES ($1, $2) RETURNING id, label").bind(Some(8i16)).bind(Some("Test")).fetch_one(&pool as &sqlx::PgPool).await.expect("insert age"));
+
+        PgDb::new(pool)
+    }
+
+    fn initialize_db_for_test(connection_string: &str) {
+        use movine::Movine;
+        // it would make more sense to use `tokio-postgres`, which is
+        // inherently async and which `postgres` is a sync wrapper
+        // around, but `movine` expects this
+        use postgres::{Client, NoTls};
+
+        let mut client = Client::connect(&connection_string, NoTls)
+            .expect("create postgres::Client from BACKEND_DB_CONNECTION_STRING");
+        let mut movine = Movine::new(&mut client);
+
+        if movine.status().is_err() {
+            movine.initialize().expect("initialize movine");
+        }
+
+        movine.up().expect("run movine migrations");
+
+        let sql = fs::read_to_string("tests/data.sql").expect("read SQL file");
+        client.simple_query(&sql).expect("execute SQL file");
     }
 
     fn make_multipart_body(boundary: &[u8], metadata: &[u8], content: &[u8]) -> Vec<u8> {

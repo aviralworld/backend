@@ -1,22 +1,23 @@
 use std::error::Error;
 use std::sync::Arc;
+use std::env;
+use std::sync::Mutex;
 
 use slog::Drain;
 use slog_async;
 use slog_json;
-use std::env;
-use std::sync::Mutex;
-
 use dotenv;
 use pretty_env_logger;
 use rusoto_core::request::HttpClient;
 use rusoto_core::Region;
 use rusoto_credential::StaticProvider;
 use rusoto_s3::S3Client;
+use sqlx;
 use tokio;
 
 use backend::audio;
 use backend::config::get_variable;
+use backend::db::PgDb;
 use backend::routes::make_upload_route;
 use backend::store::S3Store;
 
@@ -57,7 +58,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let expected_codec = get_variable("BACKEND_CODEC");
     let checker = audio::make_wrapper(ffprobe_path, expected_codec);
 
-    let routes = make_upload_route(logger, Arc::new(store), Arc::new(checker));
+    let connection_string = get_variable("BACKEND_DB_CONNECTION_STRING");
+    let pool = sqlx::Pool::new(&connection_string).await.expect("create database pool from BACKEND_DB_CONNECTION_STRING");
+    let db = PgDb::new(pool);
+
+    let routes = make_upload_route(logger, Arc::new(db), Arc::new(store), Arc::new(checker));
     warp::serve(routes).run(([127, 0, 0, 1], 3030)).await;
 
     Ok(())

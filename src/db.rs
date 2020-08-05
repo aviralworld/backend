@@ -18,6 +18,8 @@ mod postgres {
     use crate::errors::BackendError;
     use crate::recording::{NewRecording, RecordingMetadata};
 
+    static DEFAULT_URL: Option<String> = None;
+
     pub struct PgDb {
         pool: PgPool,
     }
@@ -48,13 +50,15 @@ mod postgres {
         let query: QueryAs<Postgres, (Uuid, OffsetDateTime, OffsetDateTime)> = sqlx::query_as(include_str!("queries/create.sql"));
 
         let (id, created_at, updated_at) = query
+            .bind(&DEFAULT_URL)
+            .bind(&metadata.category_id)
+            .bind(&metadata.parent_id)
+            .bind(&metadata.unlisted)
+            .bind(&metadata.name)
+            .bind(&metadata.location)
+            .bind(&metadata.occupation)
             .bind(&metadata.age_id)
             .bind(&metadata.gender_id)
-            .bind(&metadata.location)
-            .bind(&metadata.name)
-            .bind(&metadata.occupation)
-            .bind(&metadata.category_id)
-            .bind(&metadata.unlisted)
             .fetch_one(pool)
             .await
             .map_err(|e| BackendError::Sqlx { source: e })?;
