@@ -102,10 +102,10 @@ async fn process_upload<O>(
 
     debug!(logger, "got ID of inserted row"; "id" => &format!("{}", id));
 
-    process_upload_audio(logger, db, store, checker, id, upload.audio).await
+    save_upload_audio(logger, db, store, checker, id, upload.audio).await
 }
 
-async fn process_upload_audio<O>(
+async fn save_upload_audio<O>(
     logger: Arc<Logger>,
     db: Arc<impl Db>,
     store: Arc<impl Store<Output = O, Raw = Vec<u8>>>,
