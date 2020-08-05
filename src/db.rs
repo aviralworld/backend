@@ -1,18 +1,24 @@
 use futures::future::BoxFuture;
+use url::Url;
+use uuid::Uuid;
 
 use crate::errors::BackendError;
 use crate::recording::{NewRecording, RecordingMetadata};
 
 pub trait Db {
     fn insert(&self, metadata: RecordingMetadata) -> BoxFuture<Result<NewRecording, BackendError>>;
+
+    fn update_url(&self, id: Uuid, url: Url) -> BoxFuture<Result<(), BackendError>>;
 }
 
 pub use self::postgres::*;
 
 mod postgres {
+    use futures::FutureExt;
     use futures::future::BoxFuture;
     use sqlx::{self, postgres::PgPool, Postgres, QueryAs};
     use time::OffsetDateTime;
+    use url::Url;
     use uuid::Uuid;
 
     use crate::errors::BackendError;
@@ -35,9 +41,11 @@ mod postgres {
             &self,
             metadata: RecordingMetadata,
         ) -> BoxFuture<Result<NewRecording, BackendError>> {
-            use futures::FutureExt;
-
             insert(metadata, &self.pool).boxed()
+        }
+
+        fn update_url(&self, id: Uuid, url: Url) -> BoxFuture<Result<(), BackendError>> {
+           update_url(id, url, &self.pool).boxed()
         }
     }
 
@@ -64,5 +72,18 @@ mod postgres {
             .map_err(|e| BackendError::Sqlx { source: e })?;
 
         Ok(NewRecording::new(id, created_at, updated_at, metadata))
+    }
+
+    async fn update_url(id: Uuid, url: Url, pool: &PgPool) -> Result<(), BackendError> {
+        let query = sqlx::query(include_str!("queries/update_url.sql"));
+
+        let _ = query
+            .bind(id)
+            .bind(url.as_str())
+            .execute(pool)
+            .await
+            .map_err(|e| BackendError::Sqlx { source: e })?;
+
+        Ok(())
     }
 }

@@ -40,6 +40,7 @@ enum Response {
 /// The maximum form data size to accept. This should be enforced by the HTTP gateway, so on the Rust side it’s set to an unreasonably large number.
 const MAX_CONTENT_LENGTH: u64 = 2 * 1024 * 1024 * 1024;
 
+// TODO accept environment as single `Environment` struct (causes all sorts of reference and lifetime and pointers issues)
 pub fn make_upload_route<'a, O: 'a>(
     logger: Arc<Logger>,
     db: Arc<impl Db + Sync + Send + 'a>,
@@ -101,11 +102,12 @@ async fn process_upload<O>(
 
     debug!(logger, "got ID of inserted row"; "id" => &format!("{}", id));
 
-    process_upload_audio(logger, store, checker, id, upload.audio).await
+    process_upload_audio(logger, db, store, checker, id, upload.audio).await
 }
 
 async fn process_upload_audio<O>(
     logger: Arc<Logger>,
+    db: Arc<impl Db>,
     store: Arc<impl Store<Output = O, Raw = Vec<u8>>>,
     checker: Arc<impl Fn(&[u8]) -> Result<(), BackendError>>,
     key: &Uuid,
@@ -135,6 +137,20 @@ async fn process_upload_audio<O>(
             })?;
 
         debug!(logger, "saved object");
+
+        let url = store.get_url(&key_as_str).map_err(|x| {
+            error!(logger, "Couldn't generate URL"; "error" => format!("{:?}", x));
+            BackendError::FailedToGenerateUrl(x)
+        })?;
+
+        debug!(logger, "generated URL"; "url" => url.as_str());
+
+        db.update_url(*key, url)
+            .await
+            .map_err(|x| {
+                error!(logger, "Failed to update URL"; "error" => format!("{:?}", x));
+                x
+            })?;
 
         let response = StorageResponse {
             status: Response::Ok,

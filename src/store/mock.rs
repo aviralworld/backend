@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::RwLock;
 
 use futures::future::BoxFuture;
+use url::{ParseError, Url};
 
 use crate::errors;
 use crate::store::Store;
@@ -29,6 +30,10 @@ impl Store for MockStore {
         use futures::FutureExt;
 
         mock_save(&self, key, raw).boxed()
+    }
+
+    fn get_url(&self, key: impl AsRef<str>) -> Result<Url, ParseError> {
+        Url::parse(&format!("https://www.example.com/{}.{}", key.as_ref(), self.extension))
     }
 }
 

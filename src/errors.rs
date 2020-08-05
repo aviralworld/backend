@@ -18,6 +18,10 @@ pub enum BackendError {
     #[error("bad request")]
     BadRequest,
 
+    /// Represents an error generating a URL for an uploaded object.
+    #[error("couldn't generate URL")]
+    FailedToGenerateUrl(url::ParseError),
+
     /// Represents an error caused by missing parts in a form submission.
     #[error("missing parts in upload")]
     PartsMissing,

@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use futures::future::{BoxFuture, FutureExt};
 use rusoto_s3::{PutObjectRequest, S3Client, StreamingBody, S3};
+use url::{ParseError, Url};
 
 use crate::errors::StoreError;
 
@@ -16,6 +17,8 @@ pub trait Store: Send + Sync {
 
     /// Saves the given data under the given key.
     fn save(&self, key: String, raw: Self::Raw) -> BoxFuture<Result<Self::Output, StoreError>>;
+
+    fn get_url(&self, key: impl AsRef<str>) -> Result<Url, ParseError>;
 }
 
 /// A store that saves its data to S3.
@@ -25,6 +28,7 @@ pub struct S3Store {
     bucket: String,
     cache_control: String,
     content_type: String,
+    base_url: Url,
     extension: String,
 }
 
@@ -36,6 +40,7 @@ impl S3Store {
         bucket: String,
         cache_control: String,
         content_type: String,
+        base_url: Url,
         extension: String,
     ) -> Self {
         Self {
@@ -44,6 +49,7 @@ impl S3Store {
             bucket,
             cache_control,
             content_type,
+            base_url,
             extension,
         }
     }
@@ -55,6 +61,10 @@ impl Store for S3Store {
 
     fn save(&self, key: String, raw: Vec<u8>) -> BoxFuture<Result<(), StoreError>> {
         upload(self, key, raw).boxed()
+    }
+
+    fn get_url(&self, key: impl AsRef<str>) -> Result<Url, ParseError> {
+        self.base_url.join(&format!("{}.{}", key.as_ref(), self.extension))
     }
 }
 
