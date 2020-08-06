@@ -1,8 +1,13 @@
+use std::sync::Arc;
+
+use slog::Logger;
+
 use crate::errors::BackendError;
 
 pub trait CodecChecker {
     fn check_codec(
         &self,
+        logger: Arc<Logger>,
         data: &[u8],
         expected_codec: &str,
         expected_format: &str,
@@ -12,6 +17,7 @@ pub trait CodecChecker {
 }
 
 pub fn make_wrapper(
+    logger: Arc<Logger>,
     ffprobe_path: Option<String>,
     expected_codec: String,
     expected_format: String,
@@ -21,7 +27,7 @@ pub fn make_wrapper(
 
     move |data: &[u8]| {
         checker
-            .check_codec(data, &expected_codec, &expected_format)
+            .check_codec(logger.clone(), data, &expected_codec, &expected_format)
             .map(|_| ())
     }
 }
@@ -30,9 +36,11 @@ pub fn make_wrapper(
 mod inner {
     use std::ffi::OsString;
     use std::path::PathBuf;
+    use std::sync::Arc;
 
     use lazy_static::lazy_static;
     use serde::Deserialize;
+    use slog::{debug, Logger};
 
     use crate::errors::BackendError;
 
@@ -74,6 +82,7 @@ mod inner {
     impl super::CodecChecker for Checker {
         fn check_codec(
             &self,
+            logger: Arc<Logger>,
             data: &[u8],
             expected_codec: &str,
             expected_format: &str,
@@ -111,10 +120,7 @@ mod inner {
             let codec = &stream.codec_name;
             let format = &parsed.format.format_name;
 
-            eprintln!(
-                "comparing actual {:?} inside {:?} to expected {:?} inside {:?}",
-                codec, format, expected_codec, expected_format
-            );
+            debug!(logger, "verifying codec and format"; "actual_codec" => codec, "actual_format" => format, "expected_codec" => expected_codec, "expected_format" => expected_format);
 
             if codec == expected_codec && format == expected_format {
                 return Ok(());

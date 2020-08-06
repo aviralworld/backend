@@ -205,7 +205,7 @@ mod test {
 
     use once_cell::sync::OnceCell;
     use serde::Deserialize;
-    use slog::{self, o};
+    use slog::{self, Logger, o};
 
     use crate::db::Db;
     use crate::errors;
@@ -233,7 +233,7 @@ mod test {
         let logger = slog_scope::logger().new(o!("test" => "uploading_works"));
         let logger_arc = Arc::new(logger.clone());
 
-        let checker = make_wrapper_for_test();
+        let checker = make_wrapper_for_test(logger_arc.clone());
         let db = make_db().await;
 
         let filter = super::make_upload_route(
@@ -289,7 +289,7 @@ mod test {
         let logger = slog_scope::logger();
         let logger_arc = Arc::new(logger);
 
-        let checker = make_wrapper_for_test();
+        let checker = make_wrapper_for_test(logger_arc.clone());
         let db = make_db().await;
 
         let filter = super::make_upload_route(
@@ -342,10 +342,11 @@ mod test {
             .body(body)
     }
 
-    fn make_wrapper_for_test() -> impl Fn(&[u8]) -> Result<(), errors::BackendError> {
+    fn make_wrapper_for_test(logger: Arc<Logger>) -> impl Fn(&[u8]) -> Result<(), errors::BackendError> {
         use crate::audio;
 
         audio::make_wrapper(
+            logger.clone(),
             env::var("BACKEND_FFPROBE_PATH").ok(),
             env::var("BACKEND_MEDIA_CODEC")
                 .expect("must define BACKEND_MEDIA_CODEC environment variable"),
