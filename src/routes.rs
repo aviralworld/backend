@@ -142,7 +142,7 @@ async fn save_recording_metadata(
         .await
         .map_err(|_| BackendError::MalformedFormSubmission)?;
     let metadata: UploadMetadata = serde_json::from_slice(&raw_metadata)
-        .map_err(|e| reject::custom(BackendError::MalformedUploadMetadata(e)))?;
+        .map_err(|e| BackendError::MalformedUploadMetadata(e))?;
 
     let new_recording = db.insert(metadata).await?;
     let id = new_recording.id();
