@@ -16,14 +16,14 @@ pub fn normalize_name(name: impl AsRef<str>) -> String {
 /// Deserializes a `String` after running it through `normalize_name`.
 pub fn deserialize<'de, D>(deserializer: D) -> Result<String, D::Error>
 where D: Deserializer<'de> {
-    let s: &str = Deserialize::deserialize(deserializer)?;
+    let s: String = Deserialize::deserialize(deserializer)?;
     Ok(normalize_name(s))
 }
 
 /// Deserializes an optional `String` after running it through `normalize_name`.
 pub fn deserialize_option<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
 where D: Deserializer<'de> {
-    let o: Option<&str> = Deserialize::deserialize(deserializer)?;
+    let o: Option<String> = Deserialize::deserialize(deserializer)?;
     Ok(o.map(normalize_name))
 }
 
