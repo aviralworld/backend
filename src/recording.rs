@@ -6,7 +6,7 @@ use uuid::Uuid;
 use crate::normalization;
 
 /// A single recording in the database.
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Recording {
     /// The ID of the recording.
     id: Uuid,
@@ -116,7 +116,7 @@ pub struct UploadMetadata {
 }
 
 /// A single recording in the database.
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Times {
     /// The date and time it was created.
     pub(crate) created_at: OffsetDateTime,
