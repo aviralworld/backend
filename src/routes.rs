@@ -218,7 +218,7 @@ mod test {
 
     use crate::db::Db;
     use crate::errors;
-    use crate::store::mock::MockStore;
+    use crate::store::{mock::MockStore, Store};
     use crate::urls::Urls;
 
     #[derive(Debug, Deserialize)]
@@ -270,16 +270,29 @@ mod test {
         assert_eq!(segments[0], "recs");
         assert_eq!(segments.len(), 2);
 
-        assert_ne!(
-            serde_json::from_str::<Reply>(&body)
-                .expect("parse response as JSON")
-                .id
-                .unwrap(),
-            "",
-            "response must provide non-blank key"
-        );
+        let id = serde_json::from_str::<Reply>(&body)
+            .expect("parse response as JSON")
+            .id
+            .expect("get ID from response");
+
+        assert_ne!(id, "", "response must provide non-blank key");
 
         test_duplicate_upload(&file_path, &content_type).await;
+
+        let mut children: serde_json::Value = serde_json::from_reader(
+            fs::File::open("tests/simple_metadata_children.json")
+                .expect("open simple_metadata_children.json"),
+        )
+        .expect("parse simple_metadata_children.json");
+
+        let mut ids = vec![];
+
+        for mut child in children
+            .as_array_mut()
+            .expect("get array from simple_metadata_children.json")
+        {
+            ids.push(test_uploading_child(&file_path, &content_type, &id, &mut child).await);
+        }
     }
 
     async fn test_duplicate_upload(file_path: impl AsRef<Path>, content_type: impl AsRef<str>) {
@@ -312,6 +325,35 @@ mod test {
             Some("name already exists in database".to_owned()),
             "error response must mention name already exists in database"
         );
+    }
+
+    async fn test_uploading_child(
+        file_path: impl AsRef<Path>,
+        content_type: impl AsRef<str>,
+        id: &str,
+        child: &mut serde_json::Value,
+    ) -> String {
+        let filter = make_upload_filter("test_uploading_child").await;
+        let object = child.as_object_mut().expect("get child as object");
+        object.insert("parent_id".to_owned(), serde_json::json!(id));
+        let bytes = serde_json::to_vec(&object).expect("serialize edited child as JSON");
+
+        let response = upload_file(
+            file_path.as_ref(),
+            content_type.as_ref(),
+            BOUNDARY.as_bytes(),
+            &bytes,
+        )
+        .reply(&filter)
+        .await;
+
+        assert_eq!(response.status().as_u16(), StatusCode::CREATED);
+        let body = String::from_utf8_lossy(response.body()).into_owned();
+
+        return serde_json::from_str::<Reply>(&body)
+            .expect("parse response as JSON")
+            .id
+            .unwrap();
     }
 
     #[tokio::test]
@@ -347,18 +389,32 @@ mod test {
     async fn make_upload_filter(
         test_name: impl Into<String>,
     ) -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::reject::Rejection> {
+        let (logger_arc, db, store, checker, urls) = make_environment(test_name.into()).await;
+
+        super::make_upload_route(logger_arc.clone(), db, store, checker, urls)
+    }
+
+    async fn make_environment(
+        test_name: String,
+    ) -> (
+        Arc<Logger>,
+        Arc<impl Db>,
+        Arc<impl Store<Output = (), Raw = Vec<u8>>>,
+        Arc<impl Fn(&[u8]) -> Result<(), errors::BackendError>>,
+        Arc<Urls>,
+    ) {
         read_config();
         initialize_global_logger();
 
         let store = MockStore::new("ogg");
 
-        let logger = slog_scope::logger().new(o!("test" => test_name.into()));
+        let logger = slog_scope::logger().new(o!("test" => test_name));
         let logger_arc = Arc::new(logger);
 
         let checker = make_wrapper_for_test(logger_arc.clone());
         let db = make_db().await;
 
-        super::make_upload_route(
+        (
             logger_arc.clone(),
             Arc::new(db),
             Arc::new(store),
