@@ -222,6 +222,7 @@ mod test {
 
     #[tokio::test]
     async fn uploading_works() {
+        read_config();
         initialize_global_logger();
 
         static BOUNDARY: &str = "thisisaboundary1234";
@@ -281,11 +282,11 @@ mod test {
             assert_eq!(status.as_u16(), expected_status);
         }
 
+        read_config();
         initialize_global_logger();
 
         let store = MockStore::new("ogg");
 
-        //let logger = slog::Logger::root(slog::Discard, slog::o!());
         let logger = slog_scope::logger();
         let logger_arc = Arc::new(logger);
 
@@ -322,6 +323,14 @@ mod test {
 
     fn initialize_global_logger() {
         SLOG_SCOPE_GUARD.get_or_init(|| slog_envlogger::init().expect("initialize slog-envlogger"));
+    }
+
+    fn read_config() {
+        static INITIALIZED_CONFIG: Once = Once::new();
+
+        INITIALIZED_CONFIG.call_once(|| {
+            dotenv::dotenv().expect("read .env");
+        });
     }
 
     fn upload_file(
