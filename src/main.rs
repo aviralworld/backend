@@ -70,7 +70,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let ffprobe_path = env::var("BACKEND_FFPROBE_PATH").ok();
     let expected_codec = get_variable("BACKEND_MEDIA_CODEC");
     let expected_format = get_variable("BACKEND_MEDIA_FORMAT");
-    let checker = audio::make_wrapper(logger.clone(), ffprobe_path, expected_codec, expected_format);
+    let checker = audio::make_wrapper(
+        logger.clone(),
+        ffprobe_path,
+        expected_codec,
+        expected_format,
+    );
 
     let connection_string = get_variable("BACKEND_DB_CONNECTION_STRING");
     let pool = sqlx::Pool::new(&connection_string)
@@ -78,8 +83,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .expect("create database pool from BACKEND_DB_CONNECTION_STRING");
     let db = PgDb::new(pool);
 
-    let urls = Urls::new(get_variable("BACKEND_BASE_URL"), get_variable("BACKEND_RECORDINGS_PATH"));
-    let routes = make_upload_route(logger, Arc::new(db), Arc::new(store), Arc::new(checker), Arc::new(urls));
+    let urls = Urls::new(
+        get_variable("BACKEND_BASE_URL"),
+        get_variable("BACKEND_RECORDINGS_PATH"),
+    );
+    let routes = make_upload_route(
+        logger,
+        Arc::new(db),
+        Arc::new(store),
+        Arc::new(checker),
+        Arc::new(urls),
+    );
     warp::serve(routes).run(([127, 0, 0, 1], 3030)).await;
 
     Ok(())

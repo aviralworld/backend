@@ -29,11 +29,15 @@ impl Urls {
     }
 
     pub fn recordings(&self) -> Url {
-        self.base.join(&self.recordings_prefix).expect("get recordings URL")
+        self.base
+            .join(&self.recordings_prefix)
+            .expect("get recordings URL")
     }
 
     pub fn recording(&self, id: &Uuid) -> Url {
         let id = format!("{}", id);
-        self.recordings().join(&id).expect(&format!("get URL for recording {}", id))
+        self.recordings()
+            .join(&id)
+            .expect(&format!("get URL for recording {}", id))
     }
 }

@@ -105,7 +105,11 @@ async fn process_upload<O>(
         id: Some(id_as_str.clone()),
     };
 
-    Ok(with_header(with_status(json(&response), StatusCode::CREATED), "location", urls.recording(&id).as_str()))
+    Ok(with_header(
+        with_status(json(&response), StatusCode::CREATED),
+        "location",
+        urls.recording(&id).as_str(),
+    ))
 }
 
 async fn verify_audio(
@@ -268,9 +272,19 @@ mod test {
 
         let headers = response.headers();
 
-        let location = Url::parse(headers.get("location").expect("get location header").to_str().expect("convert location header to string")).expect("parse location header");
+        let location = Url::parse(
+            headers
+                .get("location")
+                .expect("get location header")
+                .to_str()
+                .expect("convert location header to string"),
+        )
+        .expect("parse location header");
         assert_eq!(location.domain(), Some("www.example.com"));
-        let segments = location.path_segments().expect("get location path segments").collect::<Vec<_>>();
+        let segments = location
+            .path_segments()
+            .expect("get location path segments")
+            .collect::<Vec<_>>();
         assert_eq!(segments[0], "recs");
         assert_eq!(segments.len(), 2);
 

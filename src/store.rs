@@ -65,8 +65,7 @@ impl Store for S3Store {
     }
 
     fn get_url<'a>(&self, key: &'a Uuid) -> Result<Url, ParseError> {
-        self.base_url
-            .join(&format!("{}.{}", key, self.extension))
+        self.base_url.join(&format!("{}.{}", key, self.extension))
     }
 }
 
