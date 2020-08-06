@@ -8,7 +8,7 @@ use uuid::Uuid;
 use warp::filters::multipart::{form, FormData, Part};
 use warp::http::StatusCode;
 use warp::reject;
-use warp::reply::{json, with_status, Json, Reply, WithStatus};
+use warp::reply::{json, with_header, with_status, Json, Reply, WithHeader, WithStatus};
 use warp::Filter;
 
 use crate::db::Db;
@@ -16,12 +16,13 @@ use crate::errors::BackendError;
 use crate::io::parse_upload;
 use crate::recording::UploadMetadata;
 use crate::store::Store;
+use crate::urls::Urls;
 
 // create, delete, update, retrieve, count
 
 #[derive(Deserialize, Serialize)]
 #[serde(untagged)]
-enum StorageResponse {
+enum CreationResponseBody {
     Success { id: Option<String> },
     Error { id: Option<String>, message: String },
 }
@@ -35,26 +36,29 @@ pub fn make_upload_route<'a, O: 'a>(
     db: Arc<impl Db + Sync + Send + 'a>,
     store: Arc<impl Store<Output = O, Raw = Vec<u8>> + 'a>,
     checker: Arc<impl Fn(&[u8]) -> Result<(), BackendError> + Send + Sync + 'a>,
+    urls: Arc<Urls>,
 ) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
     let store = store.clone();
     let db = db.clone();
     let logger1 = logger.clone();
     let logger2 = logger.clone();
     let checker = checker.clone();
+    let urls = urls.clone();
 
     // TODO this should stream the body from the request, but warp
     // doesn't support that yet
-    warp::path("recordings")
+    warp::path(urls.recordings_path.clone())
         .and(warp::post())
         .and(form().max_length(MAX_CONTENT_LENGTH))
         .and_then(
             // this can be simplified once async closures are stabilized (rust/rust-lang#62290)
-            move |content: FormData| -> BoxFuture<Result<WithStatus<Json>, reject::Rejection>> {
+            move |content: FormData| -> BoxFuture<Result<WithHeader<WithStatus<Json>>, reject::Rejection>> {
                 process_upload(
                     logger1.clone(),
                     db.clone(),
                     store.clone(),
                     checker.clone(),
+                    urls.clone(),
                     content,
                 )
                 .boxed()
@@ -68,8 +72,9 @@ async fn process_upload<O>(
     db: Arc<impl Db>,
     store: Arc<impl Store<Output = O, Raw = Vec<u8>>>,
     checker: Arc<impl Fn(&[u8]) -> Result<(), BackendError>>,
+    urls: Arc<Urls>,
     content: FormData,
-) -> Result<WithStatus<Json>, reject::Rejection> {
+) -> Result<WithHeader<WithStatus<Json>>, reject::Rejection> {
     debug!(logger, "Parsing submission...");
     let upload = parse_upload(content).await?;
     debug!(logger, "Verifying audio contents...");
@@ -96,11 +101,11 @@ async fn process_upload<O>(
         .map_err(&log_error)?;
 
     debug!(logger, "Sending response...");
-    let response = StorageResponse::Success {
+    let response = CreationResponseBody::Success {
         id: Some(id_as_str.clone()),
     };
 
-    Ok(with_status(json(&response), StatusCode::OK))
+    Ok(with_header(with_status(json(&response), StatusCode::CREATED), "location", urls.recording(&id).as_str()))
 }
 
 async fn verify_audio(
@@ -170,7 +175,7 @@ async fn format_rejection(
 ) -> Result<WithStatus<Json>, reject::Rejection> {
     if let Some(e) = rej.find::<BackendError>() {
         error!(logger, "Backend error"; "error" => format!("{:?}", e));
-        let response = StorageResponse::Error {
+        let response = CreationResponseBody::Error {
             id: None,
             message: format!("{}", e),
         };
@@ -204,11 +209,13 @@ mod test {
     use once_cell::sync::OnceCell;
     use serde::Deserialize;
     use slog::{self, o, Logger};
+    use url::Url;
     use warp::http::StatusCode;
 
     use crate::db::Db;
     use crate::errors;
     use crate::store::mock::MockStore;
+    use crate::urls::Urls;
 
     #[derive(Debug, Deserialize)]
     #[serde(deny_unknown_fields)]
@@ -241,6 +248,7 @@ mod test {
             Arc::new(db),
             Arc::new(store),
             Arc::new(checker),
+            Arc::new(Urls::new("https://www.example.com/", "recs")),
         );
 
         let cargo_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
@@ -256,7 +264,15 @@ mod test {
         let status = response.status();
         let body = String::from_utf8_lossy(response.body()).into_owned();
 
-        assert!(status.is_success());
+        assert_eq!(status.as_u16(), StatusCode::CREATED);
+
+        let headers = response.headers();
+
+        let location = Url::parse(headers.get("location").expect("get location header").to_str().expect("convert location header to string")).expect("parse location header");
+        assert_eq!(location.domain(), Some("www.example.com"));
+        let segments = location.path_segments().expect("get location path segments").collect::<Vec<_>>();
+        assert_eq!(segments[0], "recs");
+        assert_eq!(segments.len(), 2);
 
         let deserialized: Reply = serde_json::from_str(&body).expect("parse response as JSON");
         assert!(
@@ -272,7 +288,6 @@ mod test {
             let status = response.status();
             let body = String::from_utf8_lossy(response.body()).into_owned();
 
-            eprintln!("status: {:?}, body: {:?}", status, body);
             assert_eq!(status.as_u16(), StatusCode::FORBIDDEN);
 
             let deserialized: Reply = serde_json::from_str(&body).expect("parse response as JSON");
@@ -318,12 +333,13 @@ mod test {
             Arc::new(db),
             Arc::new(store),
             Arc::new(checker),
+            Arc::new(Urls::new("https://www.example.com/", "recs")),
         );
 
         {
             // should fail because of `content-type`
             let response = warp::test::request()
-                .path("/recordings/")
+                .path("/recs/")
                 .method("POST")
                 .header("content-type", "text/plain")
                 .header("content-length", 0)
@@ -365,7 +381,7 @@ mod test {
         let body = make_multipart_body(boundary, metadata, &data);
 
         warp::test::request()
-            .path("/recordings/")
+            .path("/recs/")
             .method("POST")
             .header("content-type", content_type)
             .header("content-length", body.len())

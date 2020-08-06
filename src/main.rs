@@ -21,6 +21,7 @@ use backend::config::get_variable;
 use backend::db::PgDb;
 use backend::routes::make_upload_route;
 use backend::store::S3Store;
+use backend::urls::Urls;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -77,7 +78,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .expect("create database pool from BACKEND_DB_CONNECTION_STRING");
     let db = PgDb::new(pool);
 
-    let routes = make_upload_route(logger, Arc::new(db), Arc::new(store), Arc::new(checker));
+    let urls = Urls::new(get_variable("BACKEND_BASE_URL"), get_variable("BACKEND_RECORDINGS_PATH"));
+    let routes = make_upload_route(logger, Arc::new(db), Arc::new(store), Arc::new(checker), Arc::new(urls));
     warp::serve(routes).run(([127, 0, 0, 1], 3030)).await;
 
     Ok(())
