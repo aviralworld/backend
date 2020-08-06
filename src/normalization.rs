@@ -1,3 +1,5 @@
+use serde::{Deserialize, Deserializer};
+
 /// Normalizes a name by stripping any whitespace and decomposing it
 /// into Unicode Normalization Form D.
 ///
@@ -9,6 +11,20 @@ pub fn normalize_name(name: impl AsRef<str>) -> String {
     use unicode_normalization::UnicodeNormalization;
 
     name.as_ref().trim().nfd().to_string()
+}
+
+/// Deserializes a `String` after running it through `normalize_name`.
+pub fn deserialize<'de, D>(deserializer: D) -> Result<String, D::Error>
+where D: Deserializer<'de> {
+    let s: &str = Deserialize::deserialize(deserializer)?;
+    Ok(normalize_name(s))
+}
+
+/// Deserializes an optional `String` after running it through `normalize_name`.
+pub fn deserialize_option<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where D: Deserializer<'de> {
+    let o: Option<&str> = Deserialize::deserialize(deserializer)?;
+    Ok(o.map(normalize_name))
 }
 
 #[cfg(test)]
