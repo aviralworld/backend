@@ -18,9 +18,29 @@ pub struct Recording {
     #[serde(flatten)]
     times: Times,
 
-    /// The user-submitted metadata.
-    #[serde(flatten)]
-    metadata: UploadMetadata,
+    /// The category it falls into.
+    category: Category,
+
+    /// Whether this recording is hidden from public view.
+    unlisted: bool,
+
+    /// The ID of the recording it follows, if any.
+    parent: Option<Id>,
+
+    /// The name provided. Must be unique after normalization.
+    name: String,
+
+    /// The age group provided.
+    age: Option<AgeGroup>,
+
+    /// The gender provided.
+    gender: Option<Gender>,
+
+    /// The location provided (mapped to a Google Maps place name).
+    location: Option<String>,
+
+    /// The occupation provided.
+    occupation: Option<String>,
 }
 
 /// A single recording in the database before it's uploaded.
