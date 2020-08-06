@@ -20,15 +20,10 @@ use crate::store::Store;
 // create, delete, update, retrieve, count
 
 #[derive(Deserialize, Serialize)]
-struct StorageResponse {
-    status: Response,
-    key: Option<String>,
-}
-
-#[derive(Deserialize, Serialize)]
-enum Response {
-    Ok,
-    Error,
+#[serde(untagged)]
+enum StorageResponse {
+    Success { id: Option<String> },
+    Error { id: Option<String>, message: String },
 }
 
 /// The maximum form data size to accept. This should be enforced by the HTTP gateway, so on the Rust side it’s set to an unreasonably large number.
@@ -101,9 +96,8 @@ async fn process_upload<O>(
         .map_err(&log_error)?;
 
     debug!(logger, "Sending response...");
-    let response = StorageResponse {
-        status: Response::Ok,
-        key: Some(id_as_str.clone()),
+    let response = StorageResponse::Success {
+        id: Some(id_as_str.clone()),
     };
 
     Ok(with_status(json(&response), StatusCode::OK))
@@ -176,9 +170,9 @@ async fn format_rejection(
 ) -> Result<WithStatus<Json>, reject::Rejection> {
     if let Some(e) = rej.find::<BackendError>() {
         error!(logger, "Backend error"; "error" => format!("{:?}", e));
-        let response = StorageResponse {
-            status: Response::Error,
-            key: None,
+        let response = StorageResponse::Error {
+            id: None,
+            message: format!("{}", e),
         };
 
         return Ok(with_status(json(&response), status_code_for(e)));
@@ -218,8 +212,7 @@ mod test {
     #[derive(Debug, Deserialize)]
     #[serde(deny_unknown_fields)]
     struct Reply {
-        status: String,
-        key: Option<String>,
+        id: Option<String>,
     }
 
     static SLOG_SCOPE_GUARD: OnceCell<slog_scope::GlobalLoggerGuard> = OnceCell::new();
@@ -264,9 +257,8 @@ mod test {
         assert!(status.is_success());
 
         let deserialized: Reply = serde_json::from_str(&body).expect("parse response as JSON");
-        assert_eq!(deserialized.status, "Ok", "response status must be okay");
         assert!(
-            deserialized.key.unwrap() != "",
+            deserialized.id.unwrap() != "",
             "response must provide non-blank key"
         );
     }
@@ -305,6 +297,7 @@ mod test {
         );
 
         {
+            // should fail because of `content-type`
             let response = warp::test::request()
                 .path("/recordings/")
                 .method("POST")
