@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use futures::{
     future::{BoxFuture, FutureExt},
-    StreamExt,
 };
 use serde::{Deserialize, Serialize};
 use slog::{debug, error, Logger};
@@ -16,15 +15,11 @@ use warp::Filter;
 
 use crate::db::Db;
 use crate::errors::BackendError;
+use crate::io::parse_upload;
 use crate::recording::UploadMetadata;
 use crate::store::Store;
 
 // create, delete, update, retrieve, count
-
-struct Upload {
-    audio: Part,
-    metadata: Part,
-}
 
 #[derive(Deserialize, Serialize)]
 struct StorageResponse {
@@ -82,7 +77,7 @@ async fn process_upload<O>(
     content: FormData,
 ) -> Result<WithStatus<Json>, reject::Rejection> {
     debug!(logger, "Parsing submission...");
-    let upload = parse_upload(logger.clone(), content).await?;
+    let upload = parse_upload(content).await?;
     debug!(logger, "Verifying audio contents...");
     let verified_audio = verify_audio(logger.clone(), checker, upload.audio).await?;
 
@@ -90,6 +85,8 @@ async fn process_upload<O>(
     let id = save_recording_metadata(logger.clone(), db.clone(), upload.metadata).await?;
     let id_as_str = format!("{}", id);
     let logger = Arc::new(logger.new(slog::o!("id" => id_as_str.clone())));
+
+    // TODO after this point, any errors should include the ID
 
     debug!(logger, "Saving recording to store...");
     save_upload_audio(logger.clone(), store.clone(), &id, verified_audio)
@@ -106,13 +103,6 @@ async fn process_upload<O>(
     };
 
     Ok(with_status(json(&response), StatusCode::OK))
-}
-
-async fn parse_upload(_logger: Arc<Logger>, content: FormData) -> Result<Upload, BackendError> {
-    let mut parts = collect_parts(content).await?;
-    let upload = parse_parts(&mut parts)?;
-
-    Ok(upload)
 }
 
 async fn verify_audio(
@@ -144,6 +134,7 @@ async fn save_recording_metadata(
     let metadata: UploadMetadata = serde_json::from_slice(&raw_metadata)
         .map_err(|e| BackendError::MalformedUploadMetadata(e))?;
 
+    // TODO handle the name or ID not being unique
     let new_recording = db.insert(metadata).await?;
     let id = new_recording.id();
 
@@ -202,41 +193,6 @@ fn status_code_for(e: &BackendError) -> StatusCode {
         PartsMissing => StatusCode::BAD_REQUEST,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     }
-}
-
-async fn collect_parts(content: FormData) -> Result<Vec<Part>, BackendError> {
-    let parts = (content.collect::<Vec<Result<Part, _>>>()).await;
-    let vec = parts
-        .into_iter()
-        .collect::<Result<Vec<Part>, _>>()
-        // TODO this should be a more specific error
-        .map_err(|_| BackendError::BadRequest)?;
-    Ok(vec)
-}
-
-fn parse_parts(parts: &mut Vec<Part>) -> Result<Upload, BackendError> {
-    let mut audio = None;
-    let mut metadata = None;
-
-    for p in parts.drain(0..) {
-        let name = p.name().to_owned();
-
-        if name == "audio" {
-            audio = Some(p);
-        } else if name == "metadata" {
-            metadata = Some(p);
-        }
-    }
-
-    if metadata.is_none() || audio.is_none() {
-        // TODO this should be a more specific error
-        return Err(BackendError::PartsMissing);
-    }
-
-    Ok(Upload {
-        audio: audio.unwrap(),
-        metadata: metadata.unwrap(),
-    })
 }
 
 #[cfg(test)]
