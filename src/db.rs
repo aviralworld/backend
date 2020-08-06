@@ -70,7 +70,7 @@ mod postgres {
             .bind(&metadata.gender_id)
             .fetch_one(pool)
             .await
-            .map_err(|e| BackendError::Sqlx { source: e })?;
+            .map_err(map_sqlx_error)?;
 
         Ok(NewRecording::new(id, created_at, updated_at, metadata))
     }
