@@ -62,6 +62,14 @@ pub enum BackendError {
     /// Represents an error returned by the remote server when uploading.
     #[error("failed to upload object to S3")]
     UploadFailed { source: RusotoError<PutObjectError> },
+
+    /// Represents an error caused by an ID being reused.
+    #[error("duplicate ID")]
+    DuplicateId,
+
+    /// Represents an error caused by a name being reused.
+    #[error("duplicate name")]
+    DuplicateName,
 }
 
 impl reject::Reject for BackendError {}

@@ -31,5 +31,6 @@ CREATE TABLE IF NOT EXISTS "recordings" (
     gender_id smallint REFERENCES "genders" (id),
     location text,
     occupation text,
-    PRIMARY KEY (id)
+    CONSTRAINT recordings_primary_key PRIMARY KEY (id),
+    CONSTRAINT recordings_name UNIQUE (name)
 );

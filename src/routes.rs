@@ -138,7 +138,6 @@ async fn save_recording_metadata(
     let metadata: UploadMetadata = serde_json::from_slice(&raw_metadata)
         .map_err(|e| BackendError::MalformedUploadMetadata(e))?;
 
-    // TODO handle the name or ID not being unique
     let new_recording = db.insert(metadata).await?;
     let id = new_recording.id();
 

@@ -26,6 +26,9 @@ mod postgres {
 
     static DEFAULT_URL: Option<String> = None;
 
+    const RECORDINGS_ID_CONSTRAINT: &str = "recordings_primary_key";
+    const RECORDINGS_NAME_CONSTRAINT: &str = "recordings_name";
+
     pub struct PgDb {
         pool: PgPool,
     }
@@ -49,10 +52,7 @@ mod postgres {
         }
     }
 
-    async fn insert(
-        metadata: UploadMetadata,
-        pool: &PgPool,
-    ) -> Result<NewRecording, BackendError> {
+    async fn insert(metadata: UploadMetadata, pool: &PgPool) -> Result<NewRecording, BackendError> {
         use sqlx::prelude::*;
 
         let query: QueryAs<Postgres, (Uuid, OffsetDateTime, OffsetDateTime)> =
@@ -83,8 +83,22 @@ mod postgres {
             .bind(url.as_str())
             .execute(pool)
             .await
-            .map_err(|e| BackendError::Sqlx { source: e })?;
+            .map_err(map_sqlx_error)?;
 
         Ok(())
+    }
+
+    fn map_sqlx_error(error: sqlx::Error) -> BackendError {
+        use sqlx::Error;
+
+        match error {
+            Error::Database(ref e) if e.constraint_name() == Some(RECORDINGS_ID_CONSTRAINT) => {
+                BackendError::DuplicateId
+            }
+            Error::Database(ref e) if e.constraint_name() == Some(RECORDINGS_NAME_CONSTRAINT) => {
+                BackendError::DuplicateName
+            }
+            _ => BackendError::Sqlx { source: error },
+        }
     }
 }
