@@ -94,6 +94,7 @@ pub struct UploadMetadata {
     pub(crate) gender_id: Option<Id>,
 
     /// The location provided (mapped to a Google Maps place name).
+    #[serde(default)]
     #[serde(deserialize_with = "normalization::deserialize_option")]
     pub(crate) location: Option<String>,
 
@@ -102,6 +103,7 @@ pub struct UploadMetadata {
     pub(crate) name: String,
 
     /// The occupation provided.
+    #[serde(default)]
     #[serde(deserialize_with = "normalization::deserialize_option")]
     pub(crate) occupation: Option<String>,
 
