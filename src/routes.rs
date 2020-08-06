@@ -204,6 +204,7 @@ mod test {
     use once_cell::sync::OnceCell;
     use serde::Deserialize;
     use slog::{self, o, Logger};
+    use warp::http::StatusCode;
 
     use crate::db::Db;
     use crate::errors;
@@ -212,6 +213,7 @@ mod test {
     #[derive(Debug, Deserialize)]
     #[serde(deny_unknown_fields)]
     struct Reply {
+        message: Option<String>,
         id: Option<String>,
     }
 
@@ -245,9 +247,9 @@ mod test {
         let base_path = Path::new(&cargo_dir);
         let file_path = base_path.join("tests").join("opus_file.ogg");
 
-        let body = fs::read("tests/simple_metadata.json").expect("read simple_metadata.json");
+        let bytes = fs::read("tests/simple_metadata.json").expect("read simple_metadata.json");
 
-        let response = upload_file(&file_path, &content_type, BOUNDARY.as_bytes(), &body)
+        let response = upload_file(&file_path, &content_type, BOUNDARY.as_bytes(), &bytes)
             .reply(&filter)
             .await;
 
@@ -261,12 +263,34 @@ mod test {
             deserialized.id.unwrap() != "",
             "response must provide non-blank key"
         );
+
+        {
+            let response = upload_file(&file_path, &content_type, BOUNDARY.as_bytes(), &bytes)
+                .reply(&filter)
+                .await;
+
+            let status = response.status();
+            let body = String::from_utf8_lossy(response.body()).into_owned();
+
+            eprintln!("status: {:?}, body: {:?}", status, body);
+            assert_eq!(status.as_u16(), StatusCode::FORBIDDEN);
+
+            let deserialized: Reply = serde_json::from_str(&body).expect("parse response as JSON");
+            assert!(
+                deserialized.id == None,
+                "error response must not include key"
+            );
+            assert_eq!(
+                deserialized.message,
+                Some("duplicate name".to_owned()),
+                "error response must mention duplicate name"
+            );
+        }
     }
 
     #[tokio::test]
     async fn bad_requests_fail() {
         use bytes::Bytes;
-        use warp::http::StatusCode;
 
         fn assert_failed(
             response: warp::http::Response<Bytes>,
