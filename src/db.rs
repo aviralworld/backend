@@ -93,10 +93,10 @@ mod postgres {
 
         match error {
             Error::Database(ref e) if e.constraint_name() == Some(RECORDINGS_ID_CONSTRAINT) => {
-                BackendError::DuplicateId
+                BackendError::IdAlreadyExists
             }
             Error::Database(ref e) if e.constraint_name() == Some(RECORDINGS_NAME_CONSTRAINT) => {
-                BackendError::DuplicateName
+                BackendError::NameAlreadyExists
             }
             _ => BackendError::Sqlx { source: error },
         }

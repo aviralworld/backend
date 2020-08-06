@@ -64,12 +64,12 @@ pub enum BackendError {
     UploadFailed { source: RusotoError<PutObjectError> },
 
     /// Represents an error caused by an ID being reused.
-    #[error("duplicate ID")]
-    DuplicateId,
+    #[error("ID already exists in database")]
+    IdAlreadyExists,
 
     /// Represents an error caused by a name being reused.
-    #[error("duplicate name")]
-    DuplicateName,
+    #[error("name already exists in database")]
+    NameAlreadyExists,
 }
 
 impl reject::Reject for BackendError {}

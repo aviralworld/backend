@@ -193,7 +193,7 @@ fn status_code_for(e: &BackendError) -> StatusCode {
         BadRequest | TooManyStreams(..) => StatusCode::BAD_REQUEST,
         WrongMediaType { .. } => StatusCode::UNSUPPORTED_MEDIA_TYPE,
         PartsMissing => StatusCode::BAD_REQUEST,
-        DuplicateName => StatusCode::FORBIDDEN,
+        NameAlreadyExists => StatusCode::FORBIDDEN,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
@@ -297,8 +297,8 @@ mod test {
             );
             assert_eq!(
                 deserialized.message,
-                Some("duplicate name".to_owned()),
-                "error response must mention duplicate name"
+                Some("name already exists in database".to_owned()),
+                "error response must mention name already exists in database"
             );
         }
     }
