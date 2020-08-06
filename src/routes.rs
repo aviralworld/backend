@@ -295,6 +295,9 @@ mod test {
         );
 
         {
+            // ensure the same name cannot be reused
+            let bytes = fs::read("tests/duplicate_metadata.json").expect("read duplicate_metadata.json");
+
             let response = upload_file(&file_path, &content_type, BOUNDARY.as_bytes(), &bytes)
                 .reply(&filter)
                 .await;
