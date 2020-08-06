@@ -3,6 +3,8 @@ use time::OffsetDateTime;
 use url::Url;
 use uuid::Uuid;
 
+use crate::normalization;
+
 /// A single recording in the database.
 #[derive(Clone, Debug, Deserialize)]
 pub struct Recording {
@@ -72,12 +74,15 @@ pub struct UploadMetadata {
     pub(crate) gender_id: Option<Id>,
 
     /// The location provided (mapped to a Google Maps place name).
+    #[serde(deserialize_with = "normalization::deserialize_option")]
     pub(crate) location: Option<String>,
 
     /// The name provided. Must be unique after normalization.
+    #[serde(deserialize_with = "normalization::deserialize")]
     pub(crate) name: String,
 
     /// The occupation provided.
+    #[serde(deserialize_with = "normalization::deserialize_option")]
     pub(crate) occupation: Option<String>,
 
     /// The ID of the recording it follows, if any.
