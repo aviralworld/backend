@@ -274,18 +274,6 @@ mod test {
 
         let store = MockStore::new("ogg");
 
-        // TODO this should be slog::Discard /unless/ the environment
-        // variable `BACKEND_TEST_LOGGING` is `1`
-        // let logger = {
-        //     use slog::Drain;
-        //     use slog_async;
-        //     use slog_term;
-
-        //     let decorator = slog_term::TermDecorator::new().build();
-        //     let drain = slog_term::FullFormat::new(decorator).build().fuse();
-        //     Box::new(slog_async::Async::new(drain).build().fuse())
-        // };
-        // let logger = slog::Logger::root(logger, slog::o!());
         let logger = slog_scope::logger().new(o!("test" => "uploading_works"));
         let logger_arc = Arc::new(logger.clone());
 
@@ -435,9 +423,6 @@ mod test {
         })
         .await
         .expect("must spawn blocking task");
-
-        // use sqlx::prelude::*;
-        // slog::warn!(slog_scope::logger(), "Inserted age: {:?}", sqlx::query_as::<sqlx::Postgres, (i16, String)>("INSERT INTO ages (id, label) VALUES ($1, $2) RETURNING id, label").bind(Some(8i16)).bind(Some("Test")).fetch_one(&pool as &sqlx::PgPool).await.expect("insert age"));
 
         PgDb::new(pool)
     }
