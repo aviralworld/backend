@@ -1,8 +1,6 @@
 use std::sync::Arc;
 
-use futures::{
-    future::{BoxFuture, FutureExt},
-};
+use futures::future::{BoxFuture, FutureExt};
 use serde::{Deserialize, Serialize};
 use slog::{debug, error, Logger};
 use url::Url;
@@ -55,6 +53,7 @@ pub fn make_upload_route<'a, O: 'a>(
         .and(warp::post())
         .and(form().max_length(MAX_CONTENT_LENGTH))
         .and_then(
+            // this can be simplified once async closures are stabilized (rust/rust-lang#62290)
             move |content: FormData| -> BoxFuture<Result<WithStatus<Json>, reject::Rejection>> {
                 process_upload(
                     logger1.clone(),
@@ -86,15 +85,20 @@ async fn process_upload<O>(
     let id_as_str = format!("{}", id);
     let logger = Arc::new(logger.new(slog::o!("id" => id_as_str.clone())));
 
-    // TODO after this point, any errors should include the ID
+    let log_error = |e: BackendError| {
+        error!(logger, "failed to save"; "id" => &id_as_str, "error" => format!("{:?}", e));
+        reject::custom(e)
+    };
 
     debug!(logger, "Saving recording to store...");
     save_upload_audio(logger.clone(), store.clone(), &id, verified_audio)
         .await
-        .map_err(warp::reject::custom)?;
+        .map_err(&log_error)?;
 
     debug!(logger, "Updating recording URL...");
-    update_recording_url(logger.clone(), db.clone(), store.clone(), &id).await?;
+    update_recording_url(logger.clone(), db.clone(), store.clone(), &id)
+        .await
+        .map_err(&log_error)?;
 
     debug!(logger, "Sending response...");
     let response = StorageResponse {
@@ -205,7 +209,7 @@ mod test {
 
     use once_cell::sync::OnceCell;
     use serde::Deserialize;
-    use slog::{self, Logger, o};
+    use slog::{self, o, Logger};
 
     use crate::db::Db;
     use crate::errors;
@@ -351,7 +355,9 @@ mod test {
             .body(body)
     }
 
-    fn make_wrapper_for_test(logger: Arc<Logger>) -> impl Fn(&[u8]) -> Result<(), errors::BackendError> {
+    fn make_wrapper_for_test(
+        logger: Arc<Logger>,
+    ) -> impl Fn(&[u8]) -> Result<(), errors::BackendError> {
         use crate::audio;
 
         audio::make_wrapper(
