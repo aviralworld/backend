@@ -230,30 +230,13 @@ mod test {
 
     static SLOG_SCOPE_GUARD: OnceCell<slog_scope::GlobalLoggerGuard> = OnceCell::new();
 
+    const BOUNDARY: &str = "thisisaboundary1234";
+
     #[tokio::test]
     async fn uploading_works() {
-        read_config();
-        initialize_global_logger();
-
-        static BOUNDARY: &str = "thisisaboundary1234";
-
         let content_type = multipart_content_type(&BOUNDARY);
 
-        let store = MockStore::new("ogg");
-
-        let logger = slog_scope::logger().new(o!("test" => "uploading_works"));
-        let logger_arc = Arc::new(logger.clone());
-
-        let checker = make_wrapper_for_test(logger_arc.clone());
-        let db = make_db().await;
-
-        let filter = super::make_upload_route(
-            logger_arc.clone(),
-            Arc::new(db),
-            Arc::new(store),
-            Arc::new(checker),
-            Arc::new(Urls::new("https://www.example.com/", "recs")),
-        );
+        let filter = make_upload_filter("uploading_works").await;
 
         let cargo_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
         let base_path = Path::new(&cargo_dir);
@@ -265,10 +248,9 @@ mod test {
             .reply(&filter)
             .await;
 
-        let status = response.status();
-        let body = String::from_utf8_lossy(response.body()).into_owned();
+        assert_eq!(response.status().as_u16(), StatusCode::CREATED);
 
-        assert_eq!(status.as_u16(), StatusCode::CREATED);
+        let body = String::from_utf8_lossy(response.body()).into_owned();
 
         let headers = response.headers();
 
@@ -288,40 +270,52 @@ mod test {
         assert_eq!(segments[0], "recs");
         assert_eq!(segments.len(), 2);
 
-        let deserialized: Reply = serde_json::from_str(&body).expect("parse response as JSON");
-        assert!(
-            deserialized.id.unwrap() != "",
+        assert_ne!(
+            serde_json::from_str::<Reply>(&body)
+                .expect("parse response as JSON")
+                .id
+                .unwrap(),
+            "",
             "response must provide non-blank key"
         );
 
-        {
-            // ensure the same name cannot be reused
-            let bytes = fs::read("tests/duplicate_metadata.json").expect("read duplicate_metadata.json");
+        test_duplicate_upload(&file_path, &content_type).await;
+    }
 
-            let response = upload_file(&file_path, &content_type, BOUNDARY.as_bytes(), &bytes)
-                .reply(&filter)
-                .await;
+    async fn test_duplicate_upload(file_path: impl AsRef<Path>, content_type: impl AsRef<str>) {
+        let filter = make_upload_filter("check_duplicate_upload").await;
 
-            let status = response.status();
-            let body = String::from_utf8_lossy(response.body()).into_owned();
+        // ensure the same name cannot be reused
+        let bytes =
+            fs::read("tests/duplicate_metadata.json").expect("read duplicate_metadata.json");
 
-            assert_eq!(status.as_u16(), StatusCode::FORBIDDEN);
+        let response = upload_file(
+            &file_path,
+            content_type.as_ref(),
+            BOUNDARY.as_bytes(),
+            &bytes,
+        )
+        .reply(&filter)
+        .await;
 
-            let deserialized: Reply = serde_json::from_str(&body).expect("parse response as JSON");
-            assert!(
-                deserialized.id == None,
-                "error response must not include key"
-            );
-            assert_eq!(
-                deserialized.message,
-                Some("name already exists in database".to_owned()),
-                "error response must mention name already exists in database"
-            );
-        }
+        assert_eq!(response.status().as_u16(), StatusCode::FORBIDDEN);
+
+        let body = String::from_utf8_lossy(response.body()).into_owned();
+
+        let deserialized: Reply = serde_json::from_str(&body).expect("parse response as JSON");
+        assert!(
+            deserialized.id.is_none(),
+            "error response must not include key"
+        );
+        assert_eq!(
+            deserialized.message,
+            Some("name already exists in database".to_owned()),
+            "error response must mention name already exists in database"
+        );
     }
 
     #[tokio::test]
-    async fn bad_requests_fail() {
+    async fn bad_uploads_fail() {
         use bytes::Bytes;
 
         fn assert_failed(
@@ -334,24 +328,7 @@ mod test {
             assert_eq!(status.as_u16(), expected_status);
         }
 
-        read_config();
-        initialize_global_logger();
-
-        let store = MockStore::new("ogg");
-
-        let logger = slog_scope::logger();
-        let logger_arc = Arc::new(logger);
-
-        let checker = make_wrapper_for_test(logger_arc.clone());
-        let db = make_db().await;
-
-        let filter = super::make_upload_route(
-            logger_arc.clone(),
-            Arc::new(db),
-            Arc::new(store),
-            Arc::new(checker),
-            Arc::new(Urls::new("https://www.example.com/", "recs")),
-        );
+        let filter = make_upload_filter("bad_uploads_fail").await;
 
         {
             // should fail because of `content-type`
@@ -367,13 +344,28 @@ mod test {
         }
     }
 
-    const NEWLINE: &[u8] = "\r\n".as_bytes();
-    const METADATA_HEADER: &[u8] =
-        "Content-Disposition: form-data; name=\"metadata\"\r\n\r\n".as_bytes();
-    const AUDIO_HEADER: &[u8] =
-        "Content-Disposition: form-data; name=\"audio\"\r\nContent-Type: audio/ogg\r\n\r\n"
-            .as_bytes();
-    const BOUNDARY_LEADER: &[u8] = &[b'-', b'-'];
+    async fn make_upload_filter(
+        test_name: impl Into<String>,
+    ) -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::reject::Rejection> {
+        read_config();
+        initialize_global_logger();
+
+        let store = MockStore::new("ogg");
+
+        let logger = slog_scope::logger().new(o!("test" => test_name.into()));
+        let logger_arc = Arc::new(logger);
+
+        let checker = make_wrapper_for_test(logger_arc.clone());
+        let db = make_db().await;
+
+        super::make_upload_route(
+            logger_arc.clone(),
+            Arc::new(db),
+            Arc::new(store),
+            Arc::new(checker),
+            Arc::new(Urls::new("https://www.example.com/", "recs")),
+        )
+    }
 
     fn initialize_global_logger() {
         SLOG_SCOPE_GUARD.get_or_init(|| slog_envlogger::init().expect("initialize slog-envlogger"));
@@ -471,6 +463,13 @@ mod test {
     }
 
     fn make_multipart_body(boundary: &[u8], metadata: &[u8], content: &[u8]) -> Vec<u8> {
+        const NEWLINE: &[u8] = "\r\n".as_bytes();
+        const METADATA_HEADER: &[u8] =
+            "Content-Disposition: form-data; name=\"metadata\"\r\n\r\n".as_bytes();
+        const AUDIO_HEADER: &[u8] =
+            "Content-Disposition: form-data; name=\"audio\"\r\nContent-Type: audio/ogg\r\n\r\n"
+                .as_bytes();
+
         let boundary = boundary_with_leader(boundary);
         let boundary = boundary.as_slice();
 
@@ -495,6 +494,8 @@ mod test {
     }
 
     fn boundary_with_leader(boundary: &[u8]) -> Vec<u8> {
+        const BOUNDARY_LEADER: &[u8] = &[b'-', b'-'];
+
         let parts = &[BOUNDARY_LEADER, boundary];
         parts.concat()
     }
