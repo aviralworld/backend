@@ -6,11 +6,13 @@ use crate::errors::BackendError;
 use crate::recording::{ChildRecording, NewRecording, UploadMetadata};
 
 pub trait Db {
+    fn children(&self, id: &Uuid) -> BoxFuture<Result<Vec<ChildRecording>, BackendError>>;
+
+    fn delete(&self, id: &Uuid) -> BoxFuture<Result<(), BackendError>>;
+
     fn insert(&self, metadata: UploadMetadata) -> BoxFuture<Result<NewRecording, BackendError>>;
 
     fn update_url(&self, id: &Uuid, url: &Url) -> BoxFuture<Result<(), BackendError>>;
-
-    fn children(&self, id: &Uuid) -> BoxFuture<Result<Vec<ChildRecording>, BackendError>>;
 }
 
 pub use self::postgres::*;
@@ -41,7 +43,16 @@ mod postgres {
         }
     }
 
+    // all of these forward to async functions until async fn in traits is supported
     impl super::Db for PgDb {
+        fn children(&self, id: &Uuid) -> BoxFuture<Result<Vec<ChildRecording>, BackendError>> {
+            children(id.clone(), &self.pool).boxed()
+        }
+
+        fn delete(&self, id: &Uuid) -> BoxFuture<Result<(), BackendError>> {
+            delete(id.clone(), &self.pool).boxed()
+        }
+
         fn insert(
             &self,
             metadata: UploadMetadata,
@@ -52,9 +63,32 @@ mod postgres {
         fn update_url(&self, id: &Uuid, url: &Url) -> BoxFuture<Result<(), BackendError>> {
             update_url(id.clone(), url.clone(), &self.pool).boxed()
         }
+    }
 
-        fn children(&self, id: &Uuid) -> BoxFuture<Result<Vec<ChildRecording>, BackendError>> {
-            children(id.clone(), &self.pool).boxed()
+    async fn children(id: Uuid, pool: &PgPool) -> Result<Vec<ChildRecording>, BackendError> {
+        use sqlx::prelude::*;
+
+        let query =
+            sqlx::query_as::<_, ChildRecording>(include_str!("queries/retrieve_children.sql"));
+
+        let results = query
+            .bind(id)
+            .fetch_all(pool)
+            .await
+            .map_err(map_sqlx_error)?;
+
+        Ok(results)
+    }
+
+    async fn delete(id: Uuid, pool: &PgPool) -> Result<(), BackendError> {
+        let query = sqlx::query(include_str!("queries/delete.sql"));
+
+        let count = query.bind(id).execute(pool).await.map_err(map_sqlx_error)?;
+
+        if count == 0 {
+            Err(BackendError::NonExistentId(id))
+        } else {
+            Ok(())
         }
     }
 
@@ -92,20 +126,6 @@ mod postgres {
             .map_err(map_sqlx_error)?;
 
         Ok(())
-    }
-
-    async fn children(id: Uuid, pool: &PgPool) -> Result<Vec<ChildRecording>, BackendError> {
-        use sqlx::prelude::*;
-
-        let query = sqlx::query_as::<_, ChildRecording>(include_str!("queries/retrieve_children.sql"));
-
-        let results = query
-            .bind(id)
-            .fetch_all(pool)
-            .await
-            .map_err(map_sqlx_error)?;
-
-        Ok(results)
     }
 
     fn map_sqlx_error(error: sqlx::Error) -> BackendError {

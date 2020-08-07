@@ -41,12 +41,17 @@ impl From<Rejection> for reject::Rejection {
 #[serde(untagged)]
 pub enum Context {
     Children { parent: String },
+    Delete { id: String },
     Upload { id: Option<String> },
 }
 
 impl Context {
     pub fn children(parent: String) -> Context {
         Context::Children { parent }
+    }
+
+    pub fn delete(id: String) -> Context {
+        Context::Delete { id }
     }
 
     pub fn upload(id: Option<String>) -> Context {

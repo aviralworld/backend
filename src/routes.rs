@@ -20,7 +20,7 @@ use crate::urls::Urls;
 
 mod rejection;
 
-// create, delete, update, retrieve, count
+// TODO update, retrieve, count
 
 #[derive(Debug, Serialize)]
 #[serde(untagged)]
@@ -95,6 +95,28 @@ pub fn make_children_route<'a>(
         .recover(move |r| format_rejection(logger2.clone(), r))
 }
 
+pub fn make_delete_route<'a, O: 'a>(    logger: Arc<Logger>,
+    db: Arc<impl Db + Sync + Send + 'a>,
+    store: Arc<impl Store<Output = O, Raw = Vec<u8>> + 'a>,
+    urls: Arc<Urls>,) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
+    let db = db.clone();
+    let logger1 = logger.clone();
+    let logger2 = logger.clone();
+    let urls = urls.clone();
+
+    let recordings_path = urls.recordings_path.clone();
+
+    warp::path(recordings_path)
+        .and(warp::path::param::<String>())
+        .and(warp::path::end())
+        .and(warp::delete())
+        .and_then(// this can be simplified once async closures are stabilized (rust/rust-lang#62290)
+            move |id| -> BoxFuture<Result<StatusCode, reject::Rejection>> {
+                delete_recording(logger1.clone(), db.clone(), id).boxed()
+            },)
+        .recover(move |r| format_rejection(logger2.clone(), r))
+}
+
 async fn process_upload<O>(
     logger: Arc<Logger>,
     db: Arc<impl Db>,
@@ -164,6 +186,25 @@ async fn get_children(
     let response = SuccessResponse::Children { parent, children };
 
     Ok(with_status(json(&response), StatusCode::OK))
+}
+
+async fn delete_recording(
+    logger: Arc<Logger>,
+    db: Arc<impl Db>,
+    id: String,
+) -> Result<StatusCode, reject::Rejection> {
+    let error_handler = |e: BackendError| {
+        rejection::Rejection::new(rejection::Context::delete(id.clone()), e)
+    };
+
+    let id = Uuid::parse_str(&id)
+        .map_err(|_| BackendError::InvalidId(id.clone()))
+        .map_err(error_handler)?;
+    debug!(logger, "Deleting..."; "id" => format!("{}", &id));
+
+    db.delete(&id).await.map_err(error_handler)?;
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn verify_audio(
@@ -256,6 +297,7 @@ fn status_code_for(e: &BackendError) -> StatusCode {
 
 #[cfg(test)]
 mod test {
+    use std::collections::HashSet;
     use std::env;
     use std::fs;
     use std::path::Path;
@@ -286,8 +328,6 @@ mod test {
 
     #[tokio::test]
     async fn uploading_works() {
-        use std::collections::HashSet;
-
         let content_type = multipart_content_type(&BOUNDARY);
 
         let filter = make_upload_filter("uploading_works").await;
@@ -339,7 +379,8 @@ mod test {
         )
         .expect("parse simple_metadata_children.json");
 
-        let mut ids = HashSet::new();
+        let ids = {
+            let mut ids = HashSet::new();
 
         for mut child in children
             .as_array_mut()
@@ -352,8 +393,34 @@ mod test {
             }
         }
 
-        {
+            ids
+        };
+
             let children_filter = make_children_filter("uploading_works").await;
+
+        {
+            let request = warp::test::request()
+                .path(&format!("/recs/{id}/children/", id = id))
+                .method("GET")
+                .reply(&children_filter)
+                .await;
+
+            assert_eq!(request.status().as_u16(), StatusCode::OK);
+            let returned_ids = parse_children_ids(request.body());
+            assert_eq!(ids, returned_ids);
+        }
+
+        {
+            let id_to_delete = ids.iter().skip(1).next().expect("get second child ID");
+            let delete_filter = make_delete_filter("uploading_works").await;
+            let request = warp::test::request()
+                .path(&format!("/recs/{id}/", id = id_to_delete))
+                .method("DELETE")
+                .reply(&delete_filter)
+                .await;
+
+            assert_eq!(request.status().as_u16(), StatusCode::NO_CONTENT);
+
             let request = warp::test::request()
                 .path(&format!("/recs/{id}/children/", id = id))
                 .method("GET")
@@ -362,11 +429,8 @@ mod test {
 
             assert_eq!(request.status().as_u16(), StatusCode::OK);
 
-            let body: serde_json::Value = serde_json::from_slice(request.body()).expect("parse children response");
-            let returned_children = &body.as_object().expect("get children response as object")["children"];
-            let returned_ids = returned_children.as_array().expect("get children response as array").into_iter().map(|v| v.as_object().expect("get child as object")["id"].as_str().expect("get child ID as string").to_owned()).collect::<HashSet<String>>();
-
-            assert_eq!(ids, returned_ids);
+            let returned_ids = parse_children_ids(request.body());
+            assert_eq!(ids.clone().into_iter().filter(|i| i != id_to_delete).collect::<HashSet<_>>(), returned_ids);
         }
     }
 
@@ -476,12 +540,28 @@ mod test {
         super::make_upload_route(logger_arc.clone(), db, store, checker, urls)
     }
 
+    async fn make_delete_filter(
+        test_name: impl Into<String>,
+    ) -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::reject::Rejection> {
+        let (logger_arc, db, store, _, urls) = make_environment(test_name.into()).await;
+
+        super::make_delete_route(logger_arc.clone(), db, store, urls)
+    }
+
     async fn make_children_filter(
         test_name: impl Into<String>,
     ) -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::reject::Rejection> {
         let (logger_arc, db, _, _, urls) = make_environment(test_name.into()).await;
 
         super::make_children_route(logger_arc.clone(), db, urls)
+    }
+
+    fn parse_children_ids(body: &[u8]) -> HashSet<String> {
+        let body: serde_json::Value = serde_json::from_slice(body).expect("parse children response");
+        let returned_children = &body.as_object().expect("get children response as object")["children"];
+        let returned_ids = returned_children.as_array().expect("get children response as array").into_iter().map(|v| v.as_object().expect("get child as object")["id"].as_str().expect("get child ID as string").to_owned()).collect::<HashSet<String>>();
+
+        returned_ids
     }
 
     async fn make_environment(
