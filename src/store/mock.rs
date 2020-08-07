@@ -1,5 +1,3 @@
-#![cfg(test)]
-
 use std::collections::HashMap;
 use std::sync::RwLock;
 
@@ -11,7 +9,7 @@ use crate::errors;
 use crate::store::Store;
 
 #[derive(Default)]
-pub(crate) struct MockStore {
+pub struct MockStore {
     pub(crate) map: RwLock<HashMap<String, Vec<u8>>>,
     extension: String,
 }

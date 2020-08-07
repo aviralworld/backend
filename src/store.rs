@@ -8,6 +8,7 @@ use uuid::Uuid;
 use crate::errors::BackendError;
 
 pub mod mock;
+pub use mock::*;
 
 pub trait Store: Send + Sync {
     /// The type of successful result.
