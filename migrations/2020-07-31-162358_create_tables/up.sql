@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS "recordings" (
     gender_id smallint REFERENCES "genders" (id),
     location text,
     occupation TEXT,
-    CONSTRAINT recordings_deleted_or_has_name CHECK ("deleted_at" IS NULL OR "name" IS NOT NULL),
+    CONSTRAINT recordings_deleted_or_has_name CHECK ("deleted_at" IS NOT NULL OR "name" IS NOT NULL),
     CONSTRAINT recordings_id_is_not_parent_id CHECK ("id" <> "parent_id"),
     CONSTRAINT recordings_primary_key PRIMARY KEY (id),
     CONSTRAINT recordings_name UNIQUE (NAME)
