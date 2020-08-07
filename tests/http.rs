@@ -11,10 +11,11 @@ use slog::{self, o, Logger};
 use url::Url;
 use warp::http::StatusCode;
 
+use backend::config::get_variable;
 use backend::db::Db;
 use backend::errors;
 use backend::routes;
-use backend::store::{mock::MockStore, Store};
+use backend::store::S3Store;
 use backend::urls::Urls;
 
 #[derive(Debug, Deserialize)]
@@ -139,6 +140,8 @@ async fn uploading_works() {
                 .collect::<HashSet<_>>(),
             returned_ids
         );
+
+        // TODO verify that /recs/:id/ returns 410 Gone
     }
 }
 
@@ -239,28 +242,32 @@ async fn bad_uploads_fail() {
     }
 }
 
-async fn make_upload_filter(
+async fn make_upload_filter<'a>(
     test_name: impl Into<String>,
-) -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::reject::Rejection> {
-    let (logger_arc, db, store, checker, urls) = make_environment(test_name.into()).await;
+) -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::reject::Rejection> + 'a {
+    let (logger_arc, db, checker, urls) = make_environment(test_name.into()).await;
 
-    routes::make_upload_route(logger_arc.clone(), db, store, checker, urls)
+    routes::make_upload_route(logger_arc.clone(), db, Arc::new(make_store()), checker, urls)
 }
 
-async fn make_delete_filter(
+async fn make_delete_filter<'a>(
     test_name: impl Into<String>,
-) -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::reject::Rejection> {
-    let (logger_arc, db, store, _, urls) = make_environment(test_name.into()).await;
+) -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::reject::Rejection> + 'a {
+    let (logger_arc, db, _, urls) = make_environment(test_name.into()).await;
 
-    routes::make_delete_route(logger_arc.clone(), db, store, urls)
+    routes::make_delete_route(logger_arc.clone(), db, Arc::new(make_store()), urls)
 }
 
-async fn make_children_filter(
+async fn make_children_filter<'a>(
     test_name: impl Into<String>,
-) -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::reject::Rejection> {
-    let (logger_arc, db, _, _, urls) = make_environment(test_name.into()).await;
+) -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::reject::Rejection> + 'a {
+    let (logger_arc, db, _, urls) = make_environment(test_name.into()).await;
 
     routes::make_children_route(logger_arc.clone(), db, urls)
+}
+
+fn make_store() -> S3Store {
+    S3Store::from_env().expect("initialize S3 store")
 }
 
 fn parse_children_ids(body: &[u8]) -> HashSet<String> {
@@ -286,14 +293,11 @@ async fn make_environment(
 ) -> (
     Arc<Logger>,
     Arc<impl Db>,
-    Arc<impl Store<Output = (), Raw = Vec<u8>>>,
     Arc<impl Fn(&[u8]) -> Result<(), errors::BackendError>>,
     Arc<Urls>,
 ) {
     read_config();
     initialize_global_logger();
-
-    let store = MockStore::new("ogg");
 
     let logger = slog_scope::logger().new(o!("test" => test_name));
     let logger_arc = Arc::new(logger);
@@ -304,7 +308,6 @@ async fn make_environment(
     (
         logger_arc.clone(),
         Arc::new(db),
-        Arc::new(store),
         Arc::new(checker),
         Arc::new(Urls::new("https://www.example.com/", "recs")),
     )
@@ -358,7 +361,6 @@ async fn make_db() -> impl Db {
     use sqlx::Pool;
     use tokio::task;
 
-    use backend::config::get_variable;
     use backend::db::PgDb;
 
     let connection_string = get_variable("BACKEND_DB_CONNECTION_STRING");

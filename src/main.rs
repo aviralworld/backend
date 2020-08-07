@@ -5,16 +5,11 @@ use std::sync::Mutex;
 
 use dotenv;
 use pretty_env_logger;
-use rusoto_core::request::HttpClient;
-use rusoto_core::Region;
-use rusoto_credential::StaticProvider;
-use rusoto_s3::S3Client;
 use slog::Drain;
 use slog_async;
 use slog_json;
 use sqlx;
 use tokio;
-use url::Url;
 
 use backend::audio;
 use backend::config::get_variable;
@@ -27,37 +22,7 @@ use backend::urls::Urls;
 async fn main() -> Result<(), Box<dyn Error>> {
     dotenv::dotenv().ok();
 
-    let access_key = get_variable("S3_ACCESS_KEY");
-    let secret_access_key = get_variable("S3_SECRET_ACCESS_KEY");
-
-    let region = Region::Custom {
-        name: get_variable("S3_REGION_NAME"),
-        endpoint: get_variable("S3_ENDPOINT"),
-    };
-
-    let bucket = get_variable("S3_BUCKET_NAME");
-    let content_type = get_variable("S3_CONTENT_TYPE");
-    let acl = get_variable("S3_ACL");
-    let cache_control = get_variable("S3_CACHE_CONTROL");
-
-    let client = Arc::new(S3Client::new_with(
-        HttpClient::new()?,
-        StaticProvider::new_minimal(access_key, secret_access_key),
-        region,
-    ));
-
-    let base_url = Url::parse(&get_variable("S3_BASE_URL")).expect("parse S3_BASE_URL");
-    let extension = get_variable("BACKEND_MEDIA_EXTENSION");
-
-    let store = S3Store::new(
-        client,
-        acl,
-        bucket,
-        cache_control,
-        content_type,
-        base_url,
-        extension,
-    );
+    let store = S3Store::from_env().expect("initialize S3 store from environment");
 
     let enable_warp_logging = get_variable("BACKEND_ENABLE_WARP_LOGGING");
 

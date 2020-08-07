@@ -7,9 +7,6 @@ use uuid::Uuid;
 
 use crate::errors::BackendError;
 
-pub mod mock;
-pub use mock::*;
-
 pub trait Store: Send + Sync {
     /// The type of successful result.
     type Output;
@@ -55,6 +52,46 @@ impl S3Store {
             extension,
         }
     }
+
+    pub fn from_env() -> Result<Self, rusoto_core::request::TlsError> {
+        use rusoto_core::request::HttpClient;
+        use rusoto_core::Region;
+        use rusoto_credential::StaticProvider;
+
+        use crate::config::get_variable;
+
+        let access_key = get_variable("S3_ACCESS_KEY");
+        let secret_access_key = get_variable("S3_SECRET_ACCESS_KEY");
+
+        let region = Region::Custom {
+            name: get_variable("S3_REGION_NAME"),
+            endpoint: get_variable("S3_ENDPOINT"),
+        };
+
+        let bucket = get_variable("S3_BUCKET_NAME");
+        let content_type = get_variable("S3_CONTENT_TYPE");
+        let acl = get_variable("S3_ACL");
+        let cache_control = get_variable("S3_CACHE_CONTROL");
+
+        let client = Arc::new(S3Client::new_with(
+            HttpClient::new()?,
+            StaticProvider::new_minimal(access_key, secret_access_key),
+            region,
+        ));
+
+        let base_url = Url::parse(&get_variable("S3_BASE_URL")).expect("parse S3_BASE_URL");
+        let extension = get_variable("BACKEND_MEDIA_EXTENSION");
+
+        Ok(S3Store::new(
+            client,
+            acl,
+            bucket,
+            cache_control,
+            content_type,
+            base_url,
+            extension,
+        ))
+    }
 }
 
 impl Store for S3Store {
@@ -82,7 +119,7 @@ async fn upload(store: &S3Store, key: Uuid, raw: Vec<u8>) -> Result<(), BackendE
         cache_control: Some(store.cache_control.clone()),
         content_length: Some(len),
         content_type: Some(store.content_type.clone()),
-        key: format!("{}", key),
+        key: format!("{}.{}", key, store.extension),
         ..Default::default()
     };
 
