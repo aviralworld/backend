@@ -14,9 +14,11 @@ use warp::Filter;
 use crate::db::Db;
 use crate::errors::BackendError;
 use crate::io::parse_upload;
-use crate::recording::UploadMetadata;
+use crate::recording::{ChildRecording, UploadMetadata};
 use crate::store::Store;
 use crate::urls::Urls;
+
+mod rejection;
 
 // create, delete, update, retrieve, count
 
@@ -25,6 +27,19 @@ use crate::urls::Urls;
 enum CreationResponseBody {
     Success { id: Option<String> },
     Error { id: Option<String>, message: String },
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(untagged)]
+enum ChildrenResponseBody {
+    Success {
+        parent: String,
+        children: Vec<ChildRecording>,
+    },
+    Error {
+        parent: String,
+        message: String,
+    },
 }
 
 /// The maximum form data size to accept. This should be enforced by the HTTP gateway, so on the Rust side it’s set to an unreasonably large number.
@@ -48,6 +63,7 @@ pub fn make_upload_route<'a, O: 'a>(
     // TODO this should stream the body from the request, but warp
     // doesn't support that yet
     warp::path(urls.recordings_path.clone())
+        .and(warp::path::end())
         .and(warp::post())
         .and(form().max_length(MAX_CONTENT_LENGTH))
         .and_then(
@@ -67,6 +83,31 @@ pub fn make_upload_route<'a, O: 'a>(
         .recover(move |r| format_rejection(logger2.clone(), r))
 }
 
+pub fn make_children_route<'a>(
+    logger: Arc<Logger>,
+    db: Arc<impl Db + Sync + Send + 'a>,
+    urls: Arc<Urls>,
+) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
+    let db = db.clone();
+    let logger1 = logger.clone();
+    let logger2 = logger.clone();
+    let urls = urls.clone();
+
+    let recordings_path = urls.recordings_path.clone();
+
+    warp::path(recordings_path)
+        .and(warp::path!(String / "children"))
+        .and(warp::path::end())
+        .and(warp::get())
+        .and_then(
+            // this can be simplified once async closures are stabilized (rust/rust-lang#62290)
+            move |parent| -> BoxFuture<Result<WithStatus<Json>, reject::Rejection>> {
+                get_children(logger1.clone(), db.clone(), parent).boxed()
+            },
+        )
+        .recover(move |r| format_rejection(logger2.clone(), r))
+}
+
 async fn process_upload<O>(
     logger: Arc<Logger>,
     db: Arc<impl Db>,
@@ -75,30 +116,36 @@ async fn process_upload<O>(
     urls: Arc<Urls>,
     content: FormData,
 ) -> Result<WithHeader<WithStatus<Json>>, reject::Rejection> {
+    let error_handler =
+        |e: BackendError| rejection::Rejection::new(rejection::Context::upload(None), e);
+
     debug!(logger, "Parsing submission...");
-    let upload = parse_upload(content).await?;
+    let upload = parse_upload(content).await.map_err(error_handler)?;
     debug!(logger, "Verifying audio contents...");
-    let verified_audio = verify_audio(logger.clone(), checker, upload.audio).await?;
+    let verified_audio = verify_audio(logger.clone(), checker, upload.audio)
+        .await
+        .map_err(&error_handler)?;
 
     debug!(logger, "Writing metadata to database...");
-    let id = save_recording_metadata(logger.clone(), db.clone(), upload.metadata).await?;
+    let id = save_recording_metadata(logger.clone(), db.clone(), upload.metadata)
+        .await
+        .map_err(&error_handler)?;
     let id_as_str = format!("{}", id);
     let logger = Arc::new(logger.new(slog::o!("id" => id_as_str.clone())));
 
-    let log_error = |e: BackendError| {
-        error!(logger, "failed to save"; "id" => &id_as_str, "error" => format!("{:?}", e));
-        reject::custom(e)
+    let error_handler = |e: BackendError| {
+        rejection::Rejection::new(rejection::Context::upload(Some(id_as_str.clone())), e)
     };
 
     debug!(logger, "Saving recording to store...");
     save_upload_audio(logger.clone(), store.clone(), &id, verified_audio)
         .await
-        .map_err(&log_error)?;
+        .map_err(&error_handler)?;
 
     debug!(logger, "Updating recording URL...");
     update_recording_url(logger.clone(), db.clone(), store.clone(), &id)
         .await
-        .map_err(&log_error)?;
+        .map_err(&error_handler)?;
 
     debug!(logger, "Sending response...");
     let response = CreationResponseBody::Success {
@@ -110,6 +157,26 @@ async fn process_upload<O>(
         "location",
         urls.recording(&id).as_str(),
     ))
+}
+
+async fn get_children(
+    logger: Arc<Logger>,
+    db: Arc<impl Db>,
+    parent: String,
+) -> Result<WithStatus<Json>, reject::Rejection> {
+    let error_handler = |e: BackendError| {
+        rejection::Rejection::new(rejection::Context::children(parent.clone()), e)
+    };
+
+    let id = Uuid::parse_str(&parent)
+        .map_err(|_| BackendError::InvalidId(parent.clone()))
+        .map_err(error_handler)?;
+    debug!(logger, "Searching for children..."; "parent" => format!("{}", &parent));
+
+    let children = db.children(&id).await.map_err(error_handler)?;
+    let response = ChildrenResponseBody::Success { parent, children };
+
+    Ok(with_status(json(&response), StatusCode::OK))
 }
 
 async fn verify_audio(
@@ -132,7 +199,7 @@ async fn save_recording_metadata(
     _logger: Arc<Logger>,
     db: Arc<impl Db>,
     metadata: Part,
-) -> Result<Uuid, reject::Rejection> {
+) -> Result<Uuid, BackendError> {
     use crate::io;
 
     let raw_metadata = io::part_as_vec(metadata)
@@ -177,14 +244,12 @@ async fn format_rejection(
     logger: Arc<Logger>,
     rej: reject::Rejection,
 ) -> Result<WithStatus<Json>, reject::Rejection> {
-    if let Some(e) = rej.find::<BackendError>() {
-        error!(logger, "Backend error"; "error" => format!("{:?}", e));
-        let response = CreationResponseBody::Error {
-            id: None,
-            message: format!("{}", e),
-        };
+    if let Some(r) = rej.find::<rejection::Rejection>() {
+        error!(logger, "Backend error"; "error" => format!("{:?}", r.error));
+        let e = &r.error;
+        let flattened = r.flatten();
 
-        return Ok(with_status(json(&response), status_code_for(e)));
+        return Ok(with_status(json(&flattened), status_code_for(e)));
     }
 
     Err(rej)
@@ -234,6 +299,8 @@ mod test {
 
     #[tokio::test]
     async fn uploading_works() {
+        use std::collections::HashSet;
+
         let content_type = multipart_content_type(&BOUNDARY);
 
         let filter = make_upload_filter("uploading_works").await;
@@ -285,13 +352,34 @@ mod test {
         )
         .expect("parse simple_metadata_children.json");
 
-        let mut ids = vec![];
+        let mut ids = HashSet::new();
 
         for mut child in children
             .as_array_mut()
             .expect("get array from simple_metadata_children.json")
         {
-            ids.push(test_uploading_child(&file_path, &content_type, &id, &mut child).await);
+            let child_id = test_uploading_child(&file_path, &content_type, &id, &mut child).await;
+
+            for child_id in child_id {
+                ids.insert(child_id);
+            }
+        }
+
+        {
+            let children_filter = make_children_filter("uploading_works").await;
+            let request = warp::test::request()
+                .path(&format!("/recs/{id}/children/", id = id))
+                .method("GET")
+                .reply(&children_filter)
+                .await;
+
+            assert_eq!(request.status().as_u16(), StatusCode::OK);
+
+            let body: serde_json::Value = serde_json::from_slice(request.body()).expect("parse children response");
+            let returned_children = &body.as_object().expect("get children response as object")["children"];
+            let returned_ids = returned_children.as_array().expect("get children response as array").into_iter().map(|v| v.as_object().expect("get child as object")["id"].as_str().expect("get child ID as string").to_owned()).collect::<HashSet<String>>();
+
+            assert_eq!(ids, returned_ids);
         }
     }
 
@@ -332,9 +420,10 @@ mod test {
         content_type: impl AsRef<str>,
         id: &str,
         child: &mut serde_json::Value,
-    ) -> String {
+    ) -> Option<String> {
         let filter = make_upload_filter("test_uploading_child").await;
         let object = child.as_object_mut().expect("get child as object");
+        let unlisted = object["unlisted"].as_bool().unwrap_or(false);
         object.insert("parent_id".to_owned(), serde_json::json!(id));
         let bytes = serde_json::to_vec(&object).expect("serialize edited child as JSON");
 
@@ -350,10 +439,16 @@ mod test {
         assert_eq!(response.status().as_u16(), StatusCode::CREATED);
         let body = String::from_utf8_lossy(response.body()).into_owned();
 
-        return serde_json::from_str::<Reply>(&body)
+        let id = serde_json::from_str::<Reply>(&body)
             .expect("parse response as JSON")
             .id
             .unwrap();
+
+        if unlisted {
+            None
+        } else {
+            Some(id)
+        }
     }
 
     #[tokio::test]
@@ -392,6 +487,14 @@ mod test {
         let (logger_arc, db, store, checker, urls) = make_environment(test_name.into()).await;
 
         super::make_upload_route(logger_arc.clone(), db, store, checker, urls)
+    }
+
+    async fn make_children_filter(
+        test_name: impl Into<String>,
+    ) -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::reject::Rejection> {
+        let (logger_arc, db, _, _, urls) = make_environment(test_name.into()).await;
+
+        super::make_children_route(logger_arc.clone(), db, urls)
     }
 
     async fn make_environment(

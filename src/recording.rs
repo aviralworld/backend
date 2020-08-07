@@ -117,6 +117,16 @@ pub struct UploadMetadata {
     pub(crate) unlisted: bool,
 }
 
+/// A simplified view of a recording that follows another.
+#[derive(Clone, Debug, Deserialize, sqlx::FromRow, Serialize)]
+pub struct ChildRecording {
+    /// The ID of the recording.
+    id: Uuid,
+
+    /// The name provided.
+    name: String,
+}
+
 /// A single recording in the database.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Times {

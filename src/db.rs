@@ -3,12 +3,14 @@ use url::Url;
 use uuid::Uuid;
 
 use crate::errors::BackendError;
-use crate::recording::{NewRecording, UploadMetadata};
+use crate::recording::{ChildRecording, NewRecording, UploadMetadata};
 
 pub trait Db {
     fn insert(&self, metadata: UploadMetadata) -> BoxFuture<Result<NewRecording, BackendError>>;
 
     fn update_url(&self, id: &Uuid, url: &Url) -> BoxFuture<Result<(), BackendError>>;
+
+    fn children(&self, id: &Uuid) -> BoxFuture<Result<Vec<ChildRecording>, BackendError>>;
 }
 
 pub use self::postgres::*;
@@ -22,7 +24,7 @@ mod postgres {
     use uuid::Uuid;
 
     use crate::errors::BackendError;
-    use crate::recording::{NewRecording, UploadMetadata};
+    use crate::recording::{ChildRecording, NewRecording, UploadMetadata};
 
     static DEFAULT_URL: Option<String> = None;
 
@@ -49,6 +51,10 @@ mod postgres {
 
         fn update_url(&self, id: &Uuid, url: &Url) -> BoxFuture<Result<(), BackendError>> {
             update_url(id.clone(), url.clone(), &self.pool).boxed()
+        }
+
+        fn children(&self, id: &Uuid) -> BoxFuture<Result<Vec<ChildRecording>, BackendError>> {
+            children(id.clone(), &self.pool).boxed()
         }
     }
 
@@ -86,6 +92,20 @@ mod postgres {
             .map_err(map_sqlx_error)?;
 
         Ok(())
+    }
+
+    async fn children(id: Uuid, pool: &PgPool) -> Result<Vec<ChildRecording>, BackendError> {
+        use sqlx::prelude::*;
+
+        let query = sqlx::query_as::<_, ChildRecording>(include_str!("queries/retrieve_children.sql"));
+
+        let results = query
+            .bind(id)
+            .fetch_all(pool)
+            .await
+            .map_err(map_sqlx_error)?;
+
+        Ok(results)
     }
 
     fn map_sqlx_error(error: sqlx::Error) -> BackendError {

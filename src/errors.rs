@@ -5,7 +5,7 @@ use rusoto_s3::PutObjectError;
 use serde_json;
 use sqlx;
 use thiserror::Error;
-use warp::reject;
+use uuid::Uuid;
 
 /// Enumerates high-level errors returned by this library.
 #[derive(Debug, Error)]
@@ -70,12 +70,12 @@ pub enum BackendError {
     /// Represents an error caused by a name being reused.
     #[error("name already exists in database")]
     NameAlreadyExists,
-}
 
-impl reject::Reject for BackendError {}
+    /// Represents an error caused by the user providing an invalid ID.
+    #[error("not a valid ID: {0}")]
+    InvalidId(String),
 
-impl From<BackendError> for reject::Rejection {
-    fn from(e: BackendError) -> Self {
-        warp::reject::custom(e)
-    }
+    /// Represents an error caused by the user providing a non-existent ID.
+    #[error("non-existent ID: {0}")]
+    NonExistentId(Uuid),
 }
