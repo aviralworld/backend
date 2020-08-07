@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use futures::future::{BoxFuture, FutureExt};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use slog::{debug, error, Logger};
 use url::Url;
 use uuid::Uuid;
@@ -22,24 +22,11 @@ mod rejection;
 
 // create, delete, update, retrieve, count
 
-#[derive(Deserialize, Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(untagged)]
-enum CreationResponseBody {
-    Success { id: Option<String> },
-    Error { id: Option<String>, message: String },
-}
-
-#[derive(Deserialize, Serialize)]
-#[serde(untagged)]
-enum ChildrenResponseBody {
-    Success {
-        parent: String,
-        children: Vec<ChildRecording>,
-    },
-    Error {
-        parent: String,
-        message: String,
-    },
+enum SuccessResponse {
+    Children { parent: String, children: Vec<ChildRecording> },
+    Upload { id: String },
 }
 
 /// The maximum form data size to accept. This should be enforced by the HTTP gateway, so on the Rust side it’s set to an unreasonably large number.
@@ -148,8 +135,8 @@ async fn process_upload<O>(
         .map_err(&error_handler)?;
 
     debug!(logger, "Sending response...");
-    let response = CreationResponseBody::Success {
-        id: Some(id_as_str.clone()),
+    let response = SuccessResponse::Upload {
+        id: id_as_str.clone(),
     };
 
     Ok(with_header(
@@ -174,7 +161,7 @@ async fn get_children(
     debug!(logger, "Searching for children..."; "parent" => format!("{}", &parent));
 
     let children = db.children(&id).await.map_err(error_handler)?;
-    let response = ChildrenResponseBody::Success { parent, children };
+    let response = SuccessResponse::Children { parent, children };
 
     Ok(with_status(json(&response), StatusCode::OK))
 }
