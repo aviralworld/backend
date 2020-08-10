@@ -31,8 +31,20 @@ const BOUNDARY: &str = "thisisaboundary1234";
 
 #[tokio::test]
 async fn uploading_works() {
-    let content_type = multipart_content_type(&BOUNDARY);
+    use uuid::Uuid;
 
+    {
+        let retrieve_filter = make_retrieve_filter("uploading_works").await;
+        let request = warp::test::request()
+            .path(&format!("/recs/{id}/", id = Uuid::new_v4()))
+            .method("GET")
+            .reply(&retrieve_filter)
+            .await;
+
+        assert_eq!(request.status(), StatusCode::NOT_FOUND);
+    }
+
+    let content_type = multipart_content_type(&BOUNDARY);
     let filter = make_upload_filter("uploading_works").await;
 
     let cargo_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
@@ -45,7 +57,7 @@ async fn uploading_works() {
         .reply(&filter)
         .await;
 
-    assert_eq!(response.status().as_u16(), StatusCode::CREATED);
+    assert_eq!(response.status(), StatusCode::CREATED);
 
     let body = String::from_utf8_lossy(response.body()).into_owned();
 
@@ -108,13 +120,14 @@ async fn uploading_works() {
             .reply(&children_filter)
             .await;
 
-        assert_eq!(request.status().as_u16(), StatusCode::OK);
+        assert_eq!(request.status(), StatusCode::OK);
         let returned_ids = parse_children_ids(request.body());
         assert_eq!(ids, returned_ids);
     }
 
+    let id_to_delete = ids.iter().skip(1).next().expect("get second child ID");
+
     {
-        let id_to_delete = ids.iter().skip(1).next().expect("get second child ID");
         let delete_filter = make_delete_filter("uploading_works").await;
         let request = warp::test::request()
             .path(&format!("/recs/{id}/", id = id_to_delete))
@@ -122,7 +135,7 @@ async fn uploading_works() {
             .reply(&delete_filter)
             .await;
 
-        assert_eq!(request.status().as_u16(), StatusCode::NO_CONTENT);
+        assert_eq!(request.status(), StatusCode::NO_CONTENT);
 
         let request = warp::test::request()
             .path(&format!("/recs/{id}/children/", id = id))
@@ -130,7 +143,7 @@ async fn uploading_works() {
             .reply(&children_filter)
             .await;
 
-        assert_eq!(request.status().as_u16(), StatusCode::OK);
+        assert_eq!(request.status(), StatusCode::OK);
 
         let returned_ids = parse_children_ids(request.body());
         assert_eq!(
@@ -140,8 +153,17 @@ async fn uploading_works() {
                 .collect::<HashSet<_>>(),
             returned_ids
         );
+    }
 
-        // TODO verify that /recs/:id/ returns 410 Gone
+    {
+        let retrieve_filter = make_retrieve_filter("uploading_works").await;
+        let request = warp::test::request()
+            .path(&format!("/recs/{id}/", id = id_to_delete))
+            .method("GET")
+            .reply(&retrieve_filter)
+            .await;
+
+        assert_eq!(request.status(), StatusCode::GONE);
     }
 }
 
@@ -160,7 +182,7 @@ async fn test_duplicate_upload(file_path: impl AsRef<Path>, content_type: impl A
     .reply(&filter)
     .await;
 
-    assert_eq!(response.status().as_u16(), StatusCode::FORBIDDEN);
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
 
     let body = String::from_utf8_lossy(response.body()).into_owned();
 
@@ -197,7 +219,7 @@ async fn test_uploading_child(
     .reply(&filter)
     .await;
 
-    assert_eq!(response.status().as_u16(), StatusCode::CREATED);
+    assert_eq!(response.status(), StatusCode::CREATED);
     let body = String::from_utf8_lossy(response.body()).into_owned();
 
     let id = serde_json::from_str::<Reply>(&body)
@@ -247,7 +269,13 @@ async fn make_upload_filter<'a>(
 ) -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::reject::Rejection> + 'a {
     let (logger_arc, db, checker, urls) = make_environment(test_name.into()).await;
 
-    routes::make_upload_route(logger_arc.clone(), db, Arc::new(make_store()), checker, urls)
+    routes::make_upload_route(
+        logger_arc.clone(),
+        db,
+        Arc::new(make_store()),
+        checker,
+        urls,
+    )
 }
 
 async fn make_delete_filter<'a>(
@@ -264,6 +292,14 @@ async fn make_children_filter<'a>(
     let (logger_arc, db, _, urls) = make_environment(test_name.into()).await;
 
     routes::make_children_route(logger_arc.clone(), db, urls)
+}
+
+async fn make_retrieve_filter<'a>(
+    test_name: impl Into<String>,
+) -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::reject::Rejection> + 'a {
+    let (logger_arc, db, _, urls) = make_environment(test_name.into()).await;
+
+    routes::make_retrieve_route(logger_arc.clone(), db, urls)
 }
 
 fn make_store() -> S3Store {

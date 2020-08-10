@@ -78,4 +78,12 @@ pub enum BackendError {
     /// Represents an error caused by the user providing a non-existent ID.
     #[error("non-existent ID: {0}")]
     NonExistentId(Uuid),
+
+    /// Represents an error caused by not being able to parse a URL
+    /// already in the database.
+    #[error("unable to parse URL {url}: {source}")]
+    UnableToParseUrl {
+        url: String,
+        source: url::ParseError,
+    },
 }

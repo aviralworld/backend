@@ -5,9 +5,16 @@ use uuid::Uuid;
 
 use crate::normalization;
 
-/// A single recording in the database.
+#[derive(Clone, Debug, Serialize)]
+#[serde(untagged)]
+pub enum Recording {
+    Active(ActiveRecording),
+    Deleted(DeletedRecording),
+}
+
+/// A single active recording in the database.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct Recording {
+pub struct ActiveRecording {
     /// The ID of the recording.
     id: Uuid,
 
@@ -19,28 +26,87 @@ pub struct Recording {
     times: Times,
 
     /// The category it falls into.
-    category: Category,
+    category: Label,
 
     /// Whether this recording is hidden from public view.
     unlisted: bool,
 
     /// The ID of the recording it follows, if any.
-    parent: Option<Id>,
+    parent: Option<Uuid>,
 
     /// The name provided. Must be unique after normalization.
     name: String,
 
     /// The age group provided.
-    age: Option<AgeGroup>,
+    age: Option<Label>,
 
     /// The gender provided.
-    gender: Option<Gender>,
+    gender: Option<Label>,
 
     /// The location provided (mapped to a Google Maps place name).
     location: Option<String>,
 
     /// The occupation provided.
     occupation: Option<String>,
+}
+
+impl ActiveRecording {
+    pub fn new(
+        id: Uuid,
+        times: Times,
+        name: String,
+        parent: Option<Uuid>,
+        url: Url,
+        category: Label,
+        gender: Option<Label>,
+        age: Option<Label>,
+        location: Option<String>,
+        occupation: Option<String>,
+        unlisted: bool,
+    ) -> Self {
+        ActiveRecording {
+            id,
+            name,
+            times,
+            parent,
+            url,
+            category,
+            gender,
+            age,
+            location,
+            occupation,
+            unlisted,
+        }
+    }
+}
+
+/// A single recording deleted from the database.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct DeletedRecording {
+    /// The ID of the recording.
+    id: Uuid,
+
+    /// The times it was created and updated.
+    #[serde(flatten)]
+    times: Times,
+
+    /// The time it was deleted.
+    #[serde(skip_serializing)]
+    deleted_at: OffsetDateTime,
+
+    /// The ID of the recording it follows, if any.
+    parent: Option<Uuid>,
+}
+
+impl DeletedRecording {
+    pub fn new(id: Uuid, times: Times, deleted_at: OffsetDateTime, parent: Option<Uuid>) -> Self {
+        DeletedRecording {
+            id,
+            times,
+            deleted_at,
+            parent,
+        }
+    }
 }
 
 /// A single recording in the database before it's uploaded.
@@ -137,18 +203,16 @@ pub struct Times {
     pub(crate) updated_at: OffsetDateTime,
 }
 
-/// An age group. The meaning is derived from configuration at
+/// A label for a choice. The meaning is derived from configuration at
 /// runtime.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct AgeGroup(Id, String);
+pub struct Label(Id, String);
 
-/// A gender. The meaning is derived from configuration at runtime.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct Gender(Id, String);
-
-/// A category. The meaning is derived from configuration at runtime.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct Category(Id, String);
+impl Label {
+    pub fn new(id: Id, label: String) -> Self {
+        Label(id, label)
+    }
+}
 
 /// An ID in the database.
 pub type Id = i16;
