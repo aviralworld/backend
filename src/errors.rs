@@ -1,7 +1,7 @@
 use std::io;
 
 use rusoto_core::RusotoError;
-use rusoto_s3::PutObjectError;
+use rusoto_s3::{DeleteObjectError, PutObjectError};
 use serde_json;
 use sqlx;
 use thiserror::Error;
@@ -58,6 +58,10 @@ pub enum BackendError {
     /// Represents an error returned when parsing the content to upload.
     #[error("failed to parse form submission")]
     MalformedFormSubmission,
+
+    /// Represents an error returned by the remote server when deleting.
+    #[error("failed to delete object from storage")]
+    DeleteFailed { source: RusotoError<DeleteObjectError> },
 
     /// Represents an error returned by the remote server when uploading.
     #[error("failed to upload object to S3")]

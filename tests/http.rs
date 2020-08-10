@@ -119,7 +119,6 @@ async fn uploading_works() {
             .method("GET")
             .reply(&children_filter)
             .await;
-
         assert_eq!(request.status(), StatusCode::OK);
         let returned_ids = parse_children_ids(request.body());
         assert_eq!(ids, returned_ids);
@@ -128,23 +127,44 @@ async fn uploading_works() {
     let id_to_delete = ids.iter().skip(1).next().expect("get second child ID");
 
     {
+        let retrieve_filter = make_retrieve_filter("uploading_works").await;
+        let request = warp::test::request()
+            .path(&format!("/recs/{id}/", id = id_to_delete))
+            .method("GET")
+            .reply(&retrieve_filter)
+            .await;
+        assert_eq!(request.status(), StatusCode::OK);
+        let recording_url = serde_json::from_slice::<serde_json::Value>(request.body()).expect("deserialize retrieved recording").as_object().expect("get retrieved recording as object")["url"].as_str().expect("get retrieved recording URL as string").to_owned();
+
+        {
+            let response = reqwest::get(&recording_url).await.expect("verify recording exists in store before deleting");
+            assert_eq!(response.status(), StatusCode::OK);
+        }
+
         let delete_filter = make_delete_filter("uploading_works").await;
         let request = warp::test::request()
             .path(&format!("/recs/{id}/", id = id_to_delete))
             .method("DELETE")
             .reply(&delete_filter)
             .await;
-
         assert_eq!(request.status(), StatusCode::NO_CONTENT);
+
+        let request = warp::test::request()
+            .path(&format!("/recs/{id}/", id = id_to_delete))
+            .method("GET")
+            .reply(&retrieve_filter)
+            .await;
+        assert_eq!(request.status(), StatusCode::GONE);
+
+        let response = reqwest::get(&recording_url).await.expect("make request for deleted recording to store");
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
         let request = warp::test::request()
             .path(&format!("/recs/{id}/children/", id = id))
             .method("GET")
             .reply(&children_filter)
             .await;
-
         assert_eq!(request.status(), StatusCode::OK);
-
         let returned_ids = parse_children_ids(request.body());
         assert_eq!(
             ids.clone()
@@ -155,16 +175,7 @@ async fn uploading_works() {
         );
     }
 
-    {
-        let retrieve_filter = make_retrieve_filter("uploading_works").await;
-        let request = warp::test::request()
-            .path(&format!("/recs/{id}/", id = id_to_delete))
-            .method("GET")
-            .reply(&retrieve_filter)
-            .await;
-
-        assert_eq!(request.status(), StatusCode::GONE);
-    }
+    // TODO test retrieving recordings that exist
 }
 
 async fn test_duplicate_upload(file_path: impl AsRef<Path>, content_type: impl AsRef<str>) {

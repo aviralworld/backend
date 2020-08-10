@@ -242,9 +242,8 @@ async fn delete_recording<O>(
         .map_err(error_handler)?;
     debug!(logger, "Deleting recording..."; "id" => format!("{}", &id));
 
+    store.delete(&id).await.map_err(error_handler)?;
     db.delete(&id).await.map_err(error_handler)?;
-
-    // TODO delete from store
 
     Ok(StatusCode::NO_CONTENT)
 }

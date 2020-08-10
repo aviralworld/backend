@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use futures::future::{BoxFuture, FutureExt};
-use rusoto_s3::{PutObjectRequest, S3Client, StreamingBody, S3};
+use rusoto_s3::{DeleteObjectRequest, PutObjectRequest, S3Client, StreamingBody, S3};
 use url::{ParseError, Url};
 use uuid::Uuid;
 
@@ -14,10 +14,14 @@ pub trait Store: Send + Sync {
     /// The type of raw data.
     type Raw;
 
+    /// Deletes the given object.
+    fn delete(&self, key: &Uuid) -> BoxFuture<Result<(), BackendError>>;
+
+    /// Gets the URL for the given object.
+    fn get_url(&self, key: &Uuid) -> Result<Url, ParseError>;
+
     /// Saves the given data under the given key.
     fn save(&self, key: &Uuid, raw: Self::Raw) -> BoxFuture<Result<Self::Output, BackendError>>;
-
-    fn get_url(&self, key: &Uuid) -> Result<Url, ParseError>;
 }
 
 /// A store that saves its data to S3.
@@ -98,13 +102,29 @@ impl Store for S3Store {
     type Output = ();
     type Raw = Vec<u8>;
 
-    fn save<'a>(&self, key: &Uuid, raw: Vec<u8>) -> BoxFuture<Result<(), BackendError>> {
-        upload(self, key.clone(), raw).boxed()
+    fn delete<'a>(&self, key: &'a Uuid) -> BoxFuture<Result<(), BackendError>> {
+        delete(self, key.clone()).boxed()
     }
 
     fn get_url<'a>(&self, key: &'a Uuid) -> Result<Url, ParseError> {
         self.base_url.join(&format!("{}.{}", key, self.extension))
     }
+
+    fn save<'a>(&self, key: &Uuid, raw: Vec<u8>) -> BoxFuture<Result<(), BackendError>> {
+        upload(self, key.clone(), raw).boxed()
+    }
+}
+
+async fn delete(store: &S3Store, key: Uuid) -> Result<(), BackendError> {
+    let request = DeleteObjectRequest {
+        bucket: store.bucket.clone(),
+        key: filename(store, &key),
+        ..Default::default()
+    };
+
+    let result = store.client.delete_object(request).await;
+
+    result.map(|_| ()).map_err(|source| BackendError::DeleteFailed { source })
 }
 
 async fn upload(store: &S3Store, key: Uuid, raw: Vec<u8>) -> Result<(), BackendError> {
@@ -119,7 +139,7 @@ async fn upload(store: &S3Store, key: Uuid, raw: Vec<u8>) -> Result<(), BackendE
         cache_control: Some(store.cache_control.clone()),
         content_length: Some(len),
         content_type: Some(store.content_type.clone()),
-        key: format!("{}.{}", key, store.extension),
+        key: filename(store, &key),
         ..Default::default()
     };
 
@@ -129,4 +149,8 @@ async fn upload(store: &S3Store, key: Uuid, raw: Vec<u8>) -> Result<(), BackendE
         Ok(_) => Ok(()),
         Err(e) => Err(BackendError::UploadFailed { source: e }),
     }
+}
+
+fn filename(store: &S3Store, key: &Uuid) -> String {
+    format!("{}.{}", key, store.extension)
 }
