@@ -1,0 +1,12 @@
+# STUB
+
+# TODO:
+# - environment variables
+# - cacheable builds
+# - deny warnings
+# - integration tests (real PostgreSQL and S3Mock or equivalent)
+
+# stages:
+#   - build
+#   - test
+#   - docker
