@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::env;
 use std::fs;
 use std::path::Path;
@@ -95,7 +94,7 @@ async fn uploading_works() {
     .expect("parse simple_metadata_children.json");
 
     let ids = {
-        let mut ids = HashSet::new();
+        let mut ids = vec![];
 
         for mut child in children
             .as_array_mut()
@@ -104,7 +103,7 @@ async fn uploading_works() {
             let child_id = test_uploading_child(&file_path, &content_type, &id, &mut child).await;
 
             for child_id in child_id {
-                ids.insert(child_id);
+                ids.push(child_id);
             }
         }
 
@@ -134,10 +133,16 @@ async fn uploading_works() {
             .reply(&retrieve_filter)
             .await;
         assert_eq!(request.status(), StatusCode::OK);
-        let recording_url = serde_json::from_slice::<serde_json::Value>(request.body())
-            .expect("deserialize retrieved recording")
+        let deserialized = serde_json::from_slice::<serde_json::Value>(request.body())
+            .expect("deserialize retrieved recording");
+        let recording = deserialized
             .as_object()
-            .expect("get retrieved recording as object")["url"]
+            .expect("get retrieved recording as object");
+
+        verify_recording_data(recording, &id);
+
+        // can't hard-code a test for the URL since it can vary based on the environment
+        let recording_url = recording["url"]
             .as_str()
             .expect("get retrieved recording URL as string")
             .to_owned();
@@ -180,7 +185,7 @@ async fn uploading_works() {
             ids.clone()
                 .into_iter()
                 .filter(|i| i != id_to_delete)
-                .collect::<HashSet<_>>(),
+                .collect::<Vec<_>>(),
             returned_ids
         );
     }
@@ -348,7 +353,7 @@ fn make_store() -> S3Store {
     S3Store::from_env().expect("initialize S3 store")
 }
 
-fn parse_children_ids(body: &[u8]) -> HashSet<String> {
+fn parse_children_ids(body: &[u8]) -> Vec<String> {
     let body: serde_json::Value = serde_json::from_slice(body).expect("parse children response");
     let returned_children = &body.as_object().expect("get children response as object")["children"];
     let returned_ids = returned_children
@@ -361,7 +366,7 @@ fn parse_children_ids(body: &[u8]) -> HashSet<String> {
                 .expect("get child ID as string")
                 .to_owned()
         })
-        .collect::<HashSet<String>>();
+        .collect::<Vec<_>>();
 
     returned_ids
 }
@@ -433,6 +438,41 @@ fn make_wrapper_for_test(
         env::var("BACKEND_MEDIA_FORMAT")
             .expect("must define BACKEND_MEDIA_FORMAT environment variable"),
     )
+}
+
+fn verify_recording_data(recording: &serde_json::map::Map<String, serde_json::Value>, parent_id: &str) {
+    assert_eq!(
+        recording["name"]
+            .as_str()
+            .expect("get recording name as string"),
+        "Another \r\nname"
+    );
+
+    assert!(recording["created_at"].is_i64());
+    assert!(recording["updated_at"].is_i64());
+    assert!(recording.get("deleted_at").is_none());
+
+    assert_eq!(recording["unlisted"].as_bool().expect("get recording unlisted status as boolean"), false);
+    assert_eq!(recording["parent"].as_str().expect("get recording parent as string"), parent_id);
+
+    assert_eq!(recording["occupation"].as_str().expect("get recording occupaton as string"), "something");
+    assert!(recording["location"].is_null());
+
+    assert!(recording["age"].is_null());
+
+    let verify_label = |key, id, label| {
+        let retrieved = recording[key].as_array().expect(&format!("get recording {} as array", key));
+        assert_eq!(retrieved[0].as_u64().expect(&format!("get recording {} ID as int", key)), id);
+        assert_eq!(
+            retrieved[1]
+            .as_str()
+                .expect(&format!("get recording {} label as string", key)),
+            label
+        );
+    };
+
+    verify_label("category", 1, "This is a category");
+    verify_label("gender", 2, "Some other genders");
 }
 
 async fn make_db() -> impl Db {
