@@ -215,7 +215,7 @@ async fn test_uploading_children(
 
     {
         let request = warp::test::request()
-            .path(&format!("/recs/{id}/children/", id = parent))
+            .path(&format!("/recs/id/{id}/children/", id = parent))
             .method("GET")
             .reply(&children_filter)
             .await;
@@ -266,7 +266,7 @@ async fn test_uploading_child(
 async fn test_deletion(id_to_delete: &str, parent: &str, ids: &[String]) {
     let retrieve_filter = make_retrieve_filter("api_works").await;
     let request = warp::test::request()
-        .path(&format!("/recs/{id}/", id = id_to_delete))
+        .path(&format!("/recs/id/{id}/", id = id_to_delete))
         .method("GET")
         .reply(&retrieve_filter)
         .await;
@@ -287,14 +287,14 @@ async fn test_deletion(id_to_delete: &str, parent: &str, ids: &[String]) {
 
     let delete_filter = make_delete_filter("api_works").await;
     let request = warp::test::request()
-        .path(&format!("/recs/{id}/", id = id_to_delete))
+        .path(&format!("/recs/id/{id}/", id = id_to_delete))
         .method("DELETE")
         .reply(&delete_filter)
         .await;
     assert_eq!(request.status(), StatusCode::NO_CONTENT);
 
     let request = warp::test::request()
-        .path(&format!("/recs/{id}/", id = id_to_delete))
+        .path(&format!("/recs/id/{id}/", id = id_to_delete))
         .method("GET")
         .reply(&retrieve_filter)
         .await;
@@ -306,7 +306,7 @@ async fn test_deletion(id_to_delete: &str, parent: &str, ids: &[String]) {
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
     let request = warp::test::request()
-        .path(&format!("/recs/{id}/children/", id = parent))
+        .path(&format!("/recs/id/{id}/children/", id = parent))
         .method("GET")
         .reply(&make_children_filter("test_deletion").await)
         .await;
@@ -326,7 +326,7 @@ async fn test_updating(id: &str) {
     async fn retrieve(id: &str) -> RetrievalResponse {
         let retrieve_filter = make_retrieve_filter("test_updating").await;
         let response = warp::test::request()
-            .path(&format!("/recs/{id}/", id = id))
+            .path(&format!("/recs/id/{id}/", id = id))
             .method("GET")
             .reply(&retrieve_filter)
             .await;
@@ -337,7 +337,7 @@ async fn test_updating(id: &str) {
     let before = retrieve(id).await.into_comparable();
 
     let response = warp::test::request()
-        .path(&format!("/recs/{id}/hide/", id = id))
+        .path(&format!("/recs/id/{id}/hide/", id = id))
         .method("POST")
         .reply(&make_hide_filter("uploading works").await)
         .await;
@@ -389,7 +389,7 @@ async fn test_non_existent_recording() {
 
     let retrieve_filter = make_retrieve_filter("api_works").await;
     let request = warp::test::request()
-        .path(&format!("/recs/{id}/", id = Uuid::new_v4()))
+        .path(&format!("/recs/id/{id}/", id = Uuid::new_v4()))
         .method("GET")
         .reply(&retrieve_filter)
         .await;

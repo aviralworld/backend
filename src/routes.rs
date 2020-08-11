@@ -20,7 +20,7 @@ use crate::urls::Urls;
 
 mod rejection;
 
-// TODO update privacy, count
+// TODO count
 
 #[derive(Debug, Serialize)]
 #[serde(untagged)]
@@ -93,7 +93,7 @@ pub fn make_children_route<'a>(
     let recordings_path = urls.recordings_path.clone();
 
     warp::path(recordings_path)
-        .and(warp::path!(String / "children"))
+        .and(warp::path!("id" / String / "children"))
         .and(warp::path::end())
         .and(warp::get())
         .and_then(
@@ -119,6 +119,7 @@ pub fn make_delete_route<'a, O: 'a>(
     let recordings_path = urls.recordings_path.clone();
 
     warp::path(recordings_path)
+        .and(warp::path("id"))
         .and(warp::path::param::<String>())
         .and(warp::path::end())
         .and(warp::delete())
@@ -143,6 +144,7 @@ pub fn make_retrieve_route<'a>(
     let recordings_path = urls.recordings_path.clone();
 
     warp::path(recordings_path)
+        .and(warp::path("id"))
         .and(warp::path::param::<String>())
         .and(warp::path::end())
         .and(warp::get())
@@ -167,6 +169,7 @@ pub fn make_hide_route<'a>(
     let recordings_path = urls.recordings_path.clone();
 
     warp::path(recordings_path)
+        .and(warp::path("id"))
         .and(warp::path::param::<String>())
         .and(warp::path("hide"))
         .and(warp::path::end())
