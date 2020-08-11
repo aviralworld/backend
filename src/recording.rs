@@ -197,9 +197,11 @@ pub struct ChildRecording {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Times {
     /// The date and time it was created.
+    #[serde(with = "time::serde::timestamp")]
     pub(crate) created_at: OffsetDateTime,
 
     /// The date and time it was last modified.
+    #[serde(with = "time::serde::timestamp")]
     pub(crate) updated_at: OffsetDateTime,
 }
 
