@@ -32,6 +32,7 @@ enum SuccessResponse {
     Upload {
         id: String,
     },
+    Count(i64),
 }
 
 /// The maximum form data size to accept. This should be enforced by the HTTP gateway, so on the Rust side it’s set to an unreasonably large number.
@@ -42,7 +43,32 @@ const MAX_CONTENT_LENGTH: u64 = 2 * 1024 * 1024 * 1024;
 // in the mean time, we have to use `BoxFuture` and forward to real
 // `async fn`s if we want to use `async`/`await`
 
-// TODO accept environment as single `Environment` struct (causes all sorts of reference and lifetime and pointers issues)
+// TODO accept environment as single `Environment` struct (causes all
+// sorts of reference and lifetime issues)
+
+pub fn make_count_route<'a>(
+    logger: Arc<Logger>,
+    db: Arc<impl Db + Sync + Send + 'a>,
+    urls: Arc<Urls>,
+) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
+    let db = db.clone();
+    let logger1 = logger.clone();
+    let logger2 = logger.clone();
+
+    let recordings_path = urls.recordings_path.clone();
+
+    warp::path(recordings_path)
+        .and(warp::path("count"))
+        .and(warp::path::end())
+        .and(warp::get())
+        .and_then(
+            move || -> BoxFuture<Result<Json, reject::Rejection>> {
+                get_recording_count(logger1.clone(), db.clone()).boxed()
+            },
+        )
+        .recover(move |r| format_rejection(logger2.clone(), r))
+}
+
 pub fn make_upload_route<'a, O: 'a>(
     logger: Arc<Logger>,
     db: Arc<impl Db + Sync + Send + 'a>,
@@ -322,6 +348,14 @@ async fn hide_recording(
     db.hide(&id).await.map_err(error_handler)?;
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+async fn get_recording_count(
+    _logger: Arc<Logger>,
+    db: Arc<impl Db>) -> Result<Json, reject::Rejection> {
+    let count = db.count_all().await.map_err(|e: BackendError| rejection::Rejection::new(rejection::Context::count(), e))?;
+
+    Ok(json(&SuccessResponse::Count(count)))
 }
 
 async fn verify_audio(

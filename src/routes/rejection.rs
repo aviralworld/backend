@@ -41,6 +41,7 @@ impl From<Rejection> for reject::Rejection {
 #[serde(untagged)]
 pub enum Context {
     Children { parent: String },
+    Count,
     Delete { id: String },
     Hide { id: String },
     Retrieve { id: String },
@@ -50,6 +51,10 @@ pub enum Context {
 impl Context {
     pub fn children(parent: String) -> Context {
         Context::Children { parent }
+    }
+
+    pub fn count() -> Context {
+        Context::Count
     }
 
     pub fn delete(id: String) -> Context {

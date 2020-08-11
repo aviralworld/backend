@@ -8,6 +8,8 @@ use crate::recording::{ChildRecording, NewRecording, Recording, UploadMetadata};
 pub trait Db {
     fn children(&self, id: &Uuid) -> BoxFuture<Result<Vec<ChildRecording>, BackendError>>;
 
+    fn count_all(&self) -> BoxFuture<Result<i64, BackendError>>;
+
     fn delete(&self, id: &Uuid) -> BoxFuture<Result<(), BackendError>>;
 
     fn hide(&self, id: &Uuid) -> BoxFuture<Result<(), BackendError>>;
@@ -57,6 +59,10 @@ mod postgres {
             children(id.clone(), &self.pool).boxed()
         }
 
+        fn count_all(&self) -> BoxFuture<Result<i64, BackendError>> {
+            count_all(&self.pool).boxed()
+        }
+
         fn delete(&self, id: &Uuid) -> BoxFuture<Result<(), BackendError>> {
             delete(id.clone(), &self.pool).boxed()
         }
@@ -94,6 +100,19 @@ mod postgres {
             .map_err(map_sqlx_error)?;
 
         Ok(results)
+    }
+
+    async fn count_all(pool: &PgPool) -> Result<i64, BackendError> {
+        use sqlx::prelude::*;
+
+        let query = sqlx::query_as::<_, (i64, )>(include_str!("queries/count.sql"));
+
+        let (count, ) = query
+            .fetch_one(pool)
+            .await
+            .map_err(map_sqlx_error)?;
+
+        Ok(count)
     }
 
     async fn delete(id: Uuid, pool: &PgPool) -> Result<(), BackendError> {

@@ -107,6 +107,8 @@ async fn api_works() {
     let id_to_delete = ids.iter().skip(1).next().expect("get second child ID");
     test_deletion(id_to_delete, &id, &ids).await;
 
+    test_count().await;
+
     test_updating(ids.iter().last().expect("get last child ID")).await;
 }
 
@@ -321,6 +323,18 @@ async fn test_deletion(id_to_delete: &str, parent: &str, ids: &[String]) {
     );
 }
 
+async fn test_count() {
+    let count_filter = make_count_filter("test_updating").await;
+    let response = warp::test::request()
+        .path(&format!("/recs/count"))
+        .method("GET")
+        .reply(&count_filter)
+        .await;
+    let count = String::from_utf8_lossy(response.body()).parse::<i64>().expect("parse count response as i64");
+
+    assert_eq!(count, 4);
+}
+
 async fn test_updating(id: &str) {
     // can be simplified once async closures are stabilized (rust-lang/rust#62290)
     async fn retrieve(id: &str) -> RetrievalResponse {
@@ -433,6 +447,12 @@ async fn make_retrieve_filter<'a>(
     let (logger_arc, db, _, urls) = make_environment(test_name.into()).await;
 
     routes::make_retrieve_route(logger_arc.clone(), db, urls)
+}
+
+async fn make_count_filter<'a>(test_name: impl Into<String>) -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::reject::Rejection> + 'a {
+    let (logger_arc, db, _, urls) = make_environment(test_name.into()).await;
+
+    routes::make_count_route(logger_arc.clone(), db, urls)
 }
 
 async fn make_hide_filter<'a>(
