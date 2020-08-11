@@ -41,6 +41,40 @@ struct RetrievalResponse {
     occupation: Option<String>,
 }
 
+impl RetrievalResponse {
+    fn into_comparable(self) -> ComparableRetrievalResponse {
+        ComparableRetrievalResponse {
+            id: self.id,
+            url: self.url,
+            created_at: self.created_at,
+            category: self.category,
+            unlisted: self.unlisted,
+            parent: self.parent,
+            name: self.name,
+            age: self.age,
+            gender: self.gender,
+            location: self.location,
+            occupation: self.occupation,
+        }
+    }
+}
+
+// this is RetrievalResponse minus updated_at
+#[derive(Debug, PartialEq)]
+struct ComparableRetrievalResponse {
+    id: String,
+    url: String,
+    created_at: i64,
+    category: RelatedLabel,
+    unlisted: bool,
+    parent: Option<String>,
+    name: String,
+    age: Option<RelatedLabel>,
+    gender: Option<RelatedLabel>,
+    location: Option<String>,
+    occupation: Option<String>,
+}
+
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 struct RelatedLabel(i8, String);
@@ -73,8 +107,7 @@ async fn api_works() {
     let id_to_delete = ids.iter().skip(1).next().expect("get second child ID");
     test_deletion(id_to_delete, &id, &ids).await;
 
-    // TODO
-    //test_updating(ids.iter().last().expect("get last child ID")).await;
+    test_updating(ids.iter().last().expect("get last child ID")).await;
 }
 
 async fn test_upload(file_path: impl AsRef<Path>, content_type: impl AsRef<str>) -> String {
@@ -289,6 +322,20 @@ async fn test_deletion(id_to_delete: &str, parent: &str, ids: &[String]) {
 }
 
 async fn test_updating(id: &str) {
+    // can be simplified once async closures are stabilized (rust-lang/rust#62290)
+    async fn retrieve(id: &str) -> RetrievalResponse {
+        let retrieve_filter = make_retrieve_filter("test_updating").await;
+        let response = warp::test::request()
+            .path(&format!("/recs/{id}/", id = id))
+            .method("GET")
+            .reply(&retrieve_filter)
+            .await;
+
+        serde_json::from_slice(response.body()).expect("deserialize retrieved recording")
+    }
+
+    let before = retrieve(id).await.into_comparable();
+
     let response = warp::test::request()
         .path(&format!("/recs/{id}/hide/", id = id))
         .method("POST")
@@ -296,13 +343,15 @@ async fn test_updating(id: &str) {
         .await;
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
 
-    let retrieve_filter = make_retrieve_filter("test_updating").await;
-    let request = warp::test::request()
-        .path(&format!("/recs/{id}/", id = id))
-        .method("GET")
-        .reply(&retrieve_filter)
-        .await;
-    assert_eq!(request.status(), StatusCode::OK);
+    let after = retrieve(id).await.into_comparable();
+
+    assert_eq!(
+        after,
+        ComparableRetrievalResponse {
+            unlisted: true,
+            ..before
+        }
+    );
 }
 
 #[tokio::test]
