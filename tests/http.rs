@@ -29,32 +29,43 @@ static SLOG_SCOPE_GUARD: OnceCell<slog_scope::GlobalLoggerGuard> = OnceCell::new
 const BOUNDARY: &str = "thisisaboundary1234";
 
 #[tokio::test]
-async fn uploading_works() {
-    use uuid::Uuid;
-
-    {
-        let retrieve_filter = make_retrieve_filter("uploading_works").await;
-        let request = warp::test::request()
-            .path(&format!("/recs/{id}/", id = Uuid::new_v4()))
-            .method("GET")
-            .reply(&retrieve_filter)
-            .await;
-
-        assert_eq!(request.status(), StatusCode::NOT_FOUND);
-    }
+async fn api_works() {
+    test_non_existent_recording().await;
 
     let content_type = multipart_content_type(&BOUNDARY);
-    let filter = make_upload_filter("uploading_works").await;
 
     let cargo_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
     let base_path = Path::new(&cargo_dir);
     let file_path = base_path.join("tests").join("opus_file.ogg");
 
+    let id = test_upload(&file_path, &content_type).await;
+    test_duplicate_upload(&file_path, &content_type).await;
+
+    let children: serde_json::Value = serde_json::from_reader(
+        fs::File::open("tests/simple_metadata_children.json")
+            .expect("open simple_metadata_children.json"),
+    )
+    .expect("parse simple_metadata_children.json");
+
+    let ids = test_uploading_children(&file_path, &content_type, &id, children).await;
+
+    let id_to_delete = ids.iter().skip(1).next().expect("get second child ID");
+    test_deletion(id_to_delete, &id, &ids).await;
+
+    test_updating(ids.iter().last().expect("get last child ID")).await;
+}
+
+async fn test_upload(file_path: impl AsRef<Path>, content_type: impl AsRef<str>) -> String {
     let bytes = fs::read("tests/simple_metadata.json").expect("read simple_metadata.json");
 
-    let response = upload_file(&file_path, &content_type, BOUNDARY.as_bytes(), &bytes)
-        .reply(&filter)
-        .await;
+    let response = upload_file(
+        file_path.as_ref(),
+        content_type.as_ref(),
+        BOUNDARY.as_bytes(),
+        &bytes,
+    )
+    .reply(&make_upload_filter("test_upload").await)
+    .await;
 
     assert_eq!(response.status(), StatusCode::CREATED);
 
@@ -85,125 +96,7 @@ async fn uploading_works() {
 
     assert_ne!(id, "", "response must provide non-blank key");
 
-    test_duplicate_upload(&file_path, &content_type).await;
-
-    let mut children: serde_json::Value = serde_json::from_reader(
-        fs::File::open("tests/simple_metadata_children.json")
-            .expect("open simple_metadata_children.json"),
-    )
-    .expect("parse simple_metadata_children.json");
-
-    let ids = {
-        let mut ids = vec![];
-
-        for mut child in children
-            .as_array_mut()
-            .expect("get array from simple_metadata_children.json")
-        {
-            let child_id = test_uploading_child(&file_path, &content_type, &id, &mut child).await;
-
-            for child_id in child_id {
-                ids.push(child_id);
-            }
-        }
-
-        ids
-    };
-
-    let children_filter = make_children_filter("uploading_works").await;
-
-    {
-        let request = warp::test::request()
-            .path(&format!("/recs/{id}/children/", id = id))
-            .method("GET")
-            .reply(&children_filter)
-            .await;
-        assert_eq!(request.status(), StatusCode::OK);
-        let returned_ids = parse_children_ids(request.body());
-        assert_eq!(ids, returned_ids);
-    }
-
-    let id_to_delete = ids.iter().skip(1).next().expect("get second child ID");
-
-    {
-        let retrieve_filter = make_retrieve_filter("uploading_works").await;
-        let request = warp::test::request()
-            .path(&format!("/recs/{id}/", id = id_to_delete))
-            .method("GET")
-            .reply(&retrieve_filter)
-            .await;
-        assert_eq!(request.status(), StatusCode::OK);
-        let deserialized = serde_json::from_slice::<serde_json::Value>(request.body())
-            .expect("deserialize retrieved recording");
-        let recording = deserialized
-            .as_object()
-            .expect("get retrieved recording as object");
-
-        verify_recording_data(recording, &id);
-
-        // can't hard-code a test for the URL since it can vary based on the environment
-        let recording_url = recording["url"]
-            .as_str()
-            .expect("get retrieved recording URL as string")
-            .to_owned();
-
-        {
-            let response = reqwest::get(&recording_url)
-                .await
-                .expect("verify recording exists in store before deleting");
-            assert_eq!(response.status(), StatusCode::OK);
-        }
-
-        let delete_filter = make_delete_filter("uploading_works").await;
-        let request = warp::test::request()
-            .path(&format!("/recs/{id}/", id = id_to_delete))
-            .method("DELETE")
-            .reply(&delete_filter)
-            .await;
-        assert_eq!(request.status(), StatusCode::NO_CONTENT);
-
-        let request = warp::test::request()
-            .path(&format!("/recs/{id}/", id = id_to_delete))
-            .method("GET")
-            .reply(&retrieve_filter)
-            .await;
-        assert_eq!(request.status(), StatusCode::GONE);
-
-        let response = reqwest::get(&recording_url)
-            .await
-            .expect("make request for deleted recording to store");
-        assert_eq!(response.status(), StatusCode::NOT_FOUND);
-
-        let request = warp::test::request()
-            .path(&format!("/recs/{id}/children/", id = id))
-            .method("GET")
-            .reply(&children_filter)
-            .await;
-        assert_eq!(request.status(), StatusCode::OK);
-        let returned_ids = parse_children_ids(request.body());
-        assert_eq!(
-            ids.clone()
-                .into_iter()
-                .filter(|i| i != id_to_delete)
-                .collect::<Vec<_>>(),
-            returned_ids
-        );
-    }
-
-    // TODO test output from retrieving recordings that exist
-
-    {
-        let id_to_update = ids.iter().last().expect("get last child ID");
-
-        let response = warp::test::request()
-            .path(&format!("/recs/{id}/hide/", id = id_to_update))
-            .method("POST")
-            .reply(&make_hide_filter("uploading works").await)
-            .await;
-        assert_eq!(response.status(), StatusCode::NO_CONTENT);
-
-        // TODO retrieve recording from database and verify unlisted status
-    }
+    id
 }
 
 async fn test_duplicate_upload(file_path: impl AsRef<Path>, content_type: impl AsRef<str>) {
@@ -235,6 +128,47 @@ async fn test_duplicate_upload(file_path: impl AsRef<Path>, content_type: impl A
         Some("name already exists in database".to_owned()),
         "error response must mention name already exists in database"
     );
+}
+
+async fn test_uploading_children(
+    file_path: impl AsRef<Path>,
+    content_type: impl AsRef<str>,
+    parent: &str,
+    mut children: serde_json::Value,
+) -> Vec<String> {
+    let mut ids = vec![];
+
+    for mut child in children
+        .as_array_mut()
+        .expect("get array from simple_metadata_children.json")
+    {
+        let child_id = test_uploading_child(
+            file_path.as_ref(),
+            content_type.as_ref(),
+            parent,
+            &mut child,
+        )
+        .await;
+
+        for child_id in child_id {
+            ids.push(child_id);
+        }
+    }
+
+    let children_filter = make_children_filter("api_works").await;
+
+    {
+        let request = warp::test::request()
+            .path(&format!("/recs/{id}/children/", id = parent))
+            .method("GET")
+            .reply(&children_filter)
+            .await;
+        assert_eq!(request.status(), StatusCode::OK);
+        let returned_ids = parse_children_ids(request.body());
+        assert_eq!(ids, returned_ids);
+    }
+
+    ids
 }
 
 async fn test_uploading_child(
@@ -273,6 +207,82 @@ async fn test_uploading_child(
     }
 }
 
+async fn test_deletion(id_to_delete: &str, parent: &str, ids: &[String]) {
+    let retrieve_filter = make_retrieve_filter("api_works").await;
+    let request = warp::test::request()
+        .path(&format!("/recs/{id}/", id = id_to_delete))
+        .method("GET")
+        .reply(&retrieve_filter)
+        .await;
+    assert_eq!(request.status(), StatusCode::OK);
+    let deserialized = serde_json::from_slice::<serde_json::Value>(request.body())
+        .expect("deserialize retrieved recording");
+    let recording = deserialized
+        .as_object()
+        .expect("get retrieved recording as object");
+
+    verify_recording_data(recording, parent);
+
+    // can't hard-code a test for the URL since it can vary based on the environment
+    let recording_url = recording["url"]
+        .as_str()
+        .expect("get retrieved recording URL as string")
+        .to_owned();
+
+    {
+        let response = reqwest::get(&recording_url)
+            .await
+            .expect("verify recording exists in store before deleting");
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    let delete_filter = make_delete_filter("api_works").await;
+    let request = warp::test::request()
+        .path(&format!("/recs/{id}/", id = id_to_delete))
+        .method("DELETE")
+        .reply(&delete_filter)
+        .await;
+    assert_eq!(request.status(), StatusCode::NO_CONTENT);
+
+    let request = warp::test::request()
+        .path(&format!("/recs/{id}/", id = id_to_delete))
+        .method("GET")
+        .reply(&retrieve_filter)
+        .await;
+    assert_eq!(request.status(), StatusCode::GONE);
+
+    let response = reqwest::get(&recording_url)
+        .await
+        .expect("make request for deleted recording to store");
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    let request = warp::test::request()
+        .path(&format!("/recs/{id}/children/", id = parent))
+        .method("GET")
+        .reply(&make_children_filter("test_deletion").await)
+        .await;
+    assert_eq!(request.status(), StatusCode::OK);
+    let returned_ids = parse_children_ids(request.body());
+    assert_eq!(
+        ids.iter()
+            .cloned()
+            .filter(|i| i != id_to_delete)
+            .collect::<Vec<_>>(),
+        returned_ids
+    );
+}
+
+async fn test_updating(id: &str) {
+    let response = warp::test::request()
+        .path(&format!("/recs/{id}/hide/", id = id))
+        .method("POST")
+        .reply(&make_hide_filter("uploading works").await)
+        .await;
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+    // TODO retrieve recording from database and verify unlisted status
+}
+
 #[tokio::test]
 async fn bad_uploads_fail() {
     use bytes::Bytes;
@@ -301,6 +311,19 @@ async fn bad_uploads_fail() {
 
         assert_failed(response, 400, &|s: StatusCode| s.is_client_error());
     }
+}
+
+async fn test_non_existent_recording() {
+    use uuid::Uuid;
+
+    let retrieve_filter = make_retrieve_filter("api_works").await;
+    let request = warp::test::request()
+        .path(&format!("/recs/{id}/", id = Uuid::new_v4()))
+        .method("GET")
+        .reply(&retrieve_filter)
+        .await;
+
+    assert_eq!(request.status(), StatusCode::NOT_FOUND)
 }
 
 async fn make_upload_filter<'a>(
@@ -440,7 +463,10 @@ fn make_wrapper_for_test(
     )
 }
 
-fn verify_recording_data(recording: &serde_json::map::Map<String, serde_json::Value>, parent_id: &str) {
+fn verify_recording_data(
+    recording: &serde_json::map::Map<String, serde_json::Value>,
+    parent_id: &str,
+) {
     assert_eq!(
         recording["name"]
             .as_str()
@@ -452,20 +478,42 @@ fn verify_recording_data(recording: &serde_json::map::Map<String, serde_json::Va
     assert!(recording["updated_at"].is_i64());
     assert!(recording.get("deleted_at").is_none());
 
-    assert_eq!(recording["unlisted"].as_bool().expect("get recording unlisted status as boolean"), false);
-    assert_eq!(recording["parent"].as_str().expect("get recording parent as string"), parent_id);
+    assert_eq!(
+        recording["unlisted"]
+            .as_bool()
+            .expect("get recording unlisted status as boolean"),
+        false
+    );
+    assert_eq!(
+        recording["parent"]
+            .as_str()
+            .expect("get recording parent as string"),
+        parent_id
+    );
 
-    assert_eq!(recording["occupation"].as_str().expect("get recording occupaton as string"), "something");
+    assert_eq!(
+        recording["occupation"]
+            .as_str()
+            .expect("get recording occupaton as string"),
+        "something"
+    );
     assert!(recording["location"].is_null());
 
     assert!(recording["age"].is_null());
 
     let verify_label = |key, id, label| {
-        let retrieved = recording[key].as_array().expect(&format!("get recording {} as array", key));
-        assert_eq!(retrieved[0].as_u64().expect(&format!("get recording {} ID as int", key)), id);
+        let retrieved = recording[key]
+            .as_array()
+            .expect(&format!("get recording {} as array", key));
+        assert_eq!(
+            retrieved[0]
+                .as_u64()
+                .expect(&format!("get recording {} ID as int", key)),
+            id
+        );
         assert_eq!(
             retrieved[1]
-            .as_str()
+                .as_str()
                 .expect(&format!("get recording {} label as string", key)),
             label
         );
