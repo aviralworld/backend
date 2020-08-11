@@ -134,10 +134,18 @@ async fn uploading_works() {
             .reply(&retrieve_filter)
             .await;
         assert_eq!(request.status(), StatusCode::OK);
-        let recording_url = serde_json::from_slice::<serde_json::Value>(request.body()).expect("deserialize retrieved recording").as_object().expect("get retrieved recording as object")["url"].as_str().expect("get retrieved recording URL as string").to_owned();
+        let recording_url = serde_json::from_slice::<serde_json::Value>(request.body())
+            .expect("deserialize retrieved recording")
+            .as_object()
+            .expect("get retrieved recording as object")["url"]
+            .as_str()
+            .expect("get retrieved recording URL as string")
+            .to_owned();
 
         {
-            let response = reqwest::get(&recording_url).await.expect("verify recording exists in store before deleting");
+            let response = reqwest::get(&recording_url)
+                .await
+                .expect("verify recording exists in store before deleting");
             assert_eq!(response.status(), StatusCode::OK);
         }
 
@@ -156,7 +164,9 @@ async fn uploading_works() {
             .await;
         assert_eq!(request.status(), StatusCode::GONE);
 
-        let response = reqwest::get(&recording_url).await.expect("make request for deleted recording to store");
+        let response = reqwest::get(&recording_url)
+            .await
+            .expect("make request for deleted recording to store");
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
         let request = warp::test::request()
@@ -326,7 +336,9 @@ async fn make_retrieve_filter<'a>(
     routes::make_retrieve_route(logger_arc.clone(), db, urls)
 }
 
-async fn make_hide_filter<'a>(test_name: impl Into<String>) -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::reject::Rejection> + 'a {
+async fn make_hide_filter<'a>(
+    test_name: impl Into<String>,
+) -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::reject::Rejection> + 'a {
     let (logger_arc, db, _, urls) = make_environment(test_name.into()).await;
 
     routes::make_hide_route(logger_arc.clone(), db, urls)

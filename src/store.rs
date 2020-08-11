@@ -124,7 +124,9 @@ async fn delete(store: &S3Store, key: Uuid) -> Result<(), BackendError> {
 
     let result = store.client.delete_object(request).await;
 
-    result.map(|_| ()).map_err(|source| BackendError::DeleteFailed { source })
+    result
+        .map(|_| ())
+        .map_err(|source| BackendError::DeleteFailed { source })
 }
 
 async fn upload(store: &S3Store, key: Uuid, raw: Vec<u8>) -> Result<(), BackendError> {

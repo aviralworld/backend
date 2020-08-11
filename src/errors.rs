@@ -61,7 +61,9 @@ pub enum BackendError {
 
     /// Represents an error returned by the remote server when deleting.
     #[error("failed to delete object from storage")]
-    DeleteFailed { source: RusotoError<DeleteObjectError> },
+    DeleteFailed {
+        source: RusotoError<DeleteObjectError>,
+    },
 
     /// Represents an error returned by the remote server when uploading.
     #[error("failed to upload object to S3")]
