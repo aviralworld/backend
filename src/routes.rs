@@ -154,6 +154,31 @@ pub fn make_retrieve_route<'a>(
         .recover(move |r| format_rejection(logger2.clone(), r))
 }
 
+pub fn make_hide_route<'a>(
+    logger: Arc<Logger>,
+    db: Arc<impl Db + Sync + Send + 'a>,
+    urls: Arc<Urls>,
+) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
+    let db = db.clone();
+    let logger1 = logger.clone();
+    let logger2 = logger.clone();
+    let urls = urls.clone();
+
+    let recordings_path = urls.recordings_path.clone();
+
+    warp::path(recordings_path)
+        .and(warp::path::param::<String>())
+        .and(warp::path("hide"))
+        .and(warp::path::end())
+        .and(warp::post())
+        .and_then(
+            move |id| -> BoxFuture<Result<StatusCode, reject::Rejection>> {
+                hide_recording(logger1.clone(), db.clone(), id).boxed()
+            },
+        )
+        .recover(move |r| format_rejection(logger2.clone(), r))
+}
+
 async fn process_upload<O>(
     logger: Arc<Logger>,
     db: Arc<impl Db>,
@@ -276,6 +301,24 @@ async fn retrieve_recording(
         }
         None => Ok(with_status(json(&()), StatusCode::NOT_FOUND)),
     }
+}
+
+async fn hide_recording(
+    logger: Arc<Logger>,
+    db: Arc<impl Db>,
+    id: String,
+) -> Result<StatusCode, reject::Rejection> {
+    let error_handler =
+        |e: BackendError| rejection::Rejection::new(rejection::Context::hide(id.clone()), e);
+
+    let id = Uuid::parse_str(&id)
+        .map_err(|_| BackendError::InvalidId(id.clone()))
+        .map_err(error_handler)?;
+    debug!(logger, "Hiding recording..."; "id" => format!("{}", &id));
+
+    db.hide(&id).await.map_err(error_handler)?;
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn verify_audio(

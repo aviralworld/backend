@@ -42,6 +42,7 @@ impl From<Rejection> for reject::Rejection {
 pub enum Context {
     Children { parent: String },
     Delete { id: String },
+    Hide { id: String },
     Retrieve { id: String },
     Upload { id: Option<String> },
 }
@@ -53,6 +54,10 @@ impl Context {
 
     pub fn delete(id: String) -> Context {
         Context::Delete { id }
+    }
+
+    pub fn hide(id: String) -> Context {
+        Context::Hide { id }
     }
 
     pub fn retrieve(id: String) -> Context {

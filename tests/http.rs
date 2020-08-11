@@ -175,7 +175,20 @@ async fn uploading_works() {
         );
     }
 
-    // TODO test retrieving recordings that exist
+    // TODO test output from retrieving recordings that exist
+
+    {
+        let id_to_update = ids.iter().last().expect("get last child ID");
+
+        let response = warp::test::request()
+            .path(&format!("/recs/{id}/hide/", id = id_to_update))
+            .method("POST")
+            .reply(&make_hide_filter("uploading works").await)
+            .await;
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+        // TODO retrieve recording from database and verify unlisted status
+    }
 }
 
 async fn test_duplicate_upload(file_path: impl AsRef<Path>, content_type: impl AsRef<str>) {
@@ -311,6 +324,12 @@ async fn make_retrieve_filter<'a>(
     let (logger_arc, db, _, urls) = make_environment(test_name.into()).await;
 
     routes::make_retrieve_route(logger_arc.clone(), db, urls)
+}
+
+async fn make_hide_filter<'a>(test_name: impl Into<String>) -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::reject::Rejection> + 'a {
+    let (logger_arc, db, _, urls) = make_environment(test_name.into()).await;
+
+    routes::make_hide_route(logger_arc.clone(), db, urls)
 }
 
 fn make_store() -> S3Store {

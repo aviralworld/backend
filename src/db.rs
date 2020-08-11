@@ -10,6 +10,8 @@ pub trait Db {
 
     fn delete(&self, id: &Uuid) -> BoxFuture<Result<(), BackendError>>;
 
+    fn hide(&self, id: &Uuid) -> BoxFuture<Result<(), BackendError>>;
+
     fn insert(&self, metadata: UploadMetadata) -> BoxFuture<Result<NewRecording, BackendError>>;
 
     fn retrieve(&self, id: &Uuid) -> BoxFuture<Result<Option<Recording>, BackendError>>;
@@ -59,6 +61,10 @@ mod postgres {
             delete(id.clone(), &self.pool).boxed()
         }
 
+        fn hide(&self, id: &Uuid) -> BoxFuture<Result<(), BackendError>> {
+            hide(id.clone(), &self.pool).boxed()
+        }
+
         fn insert(
             &self,
             metadata: UploadMetadata,
@@ -100,6 +106,19 @@ mod postgres {
         } else {
             Ok(())
         }
+    }
+
+    async fn hide(id: Uuid, pool: &PgPool) -> Result<(), BackendError> {
+        let query = sqlx::query(include_str!("queries/update_privacy.sql"));
+
+        let _ = query
+            .bind(id)
+            .bind(true)
+            .execute(pool)
+            .await
+            .map_err(map_sqlx_error)?;
+
+        Ok(())
     }
 
     async fn insert(metadata: UploadMetadata, pool: &PgPool) -> Result<NewRecording, BackendError> {
