@@ -1,12 +1,66 @@
-# STUB
+stages:
+  - check
+  - docker
 
-# TODO:
-# - environment variables
-# - cacheable builds
-# - deny warnings
-# - integration tests (real PostgreSQL and S3Mock or equivalent)
+check:
+  stage: check
+  image: rust:1.45.2-alpine
+  before_script:
+    - apk add openssl-dev musl-dev
+  script:
+    - rustup component add clippy
+    # equivalent to #![deny(warnings)]
+    - RUSTFLAGS="-D warnings" cargo check && cargo clippy
+  only:
+    - merge_requests
+  interruptible: yes
 
-# stages:
-#   - build
-#   - test
-#   - docker
+test:
+  stage: check
+  image: rust:1.45.2-alpine
+  services:
+    - postgres:12.3-alpine@sha256:4c5db602c06b811737746e4564040e554ba68cd2ded46a736cbe1af3a638ed0a
+    - adobe/s3mock:2.1.24@sha256:f444c12e38050dcf339e8784cacfa40d14a4876503d2818982acb7f117ef03df
+  variables:
+    # credentials (not required for testing)
+    S3_ACCESS_KEY: ""
+    S3_SECRET_ACCESS_KEY: ""
+  
+    # S3 configuration
+    S3_BUCKET_NAME: avw-recordings
+    S3_REGION_NAME: local
+    S3_ENDPOINT: http://adobe-s3mock:9090
+    S3_BASE_URL: $S3_ENDPOINT/$S3_BUCKET_NAME/
+  
+    BACKEND_S3_CONTENT_TYPE: audio/ogg
+    BACKEND_S3_ACL: public-read
+    BACKEND_S3_CACHE_CONTROL: "public, max-age: 604800, immutable"
+  
+    BACKEND_ENABLE_WARP_LOGGING: 1
+    BACKEND_MEDIA_CODEC: opus
+    BACKEND_MEDIA_EXTENSION: ogg
+    BACKEND_MEDIA_FORMAT: ogg
+    BACKEND_FFPROBE_PATH: ffprobe
+    BACKEND_TEST_INITIALIZE_DB: 1
+    BACKEND_BASE_URL: https://www.example.com/
+    BACKEND_RECORDINGS_PATH: recordings
+  
+    POSTGRES_USER: postgres
+    POSTGRES_PASSWORD: 1234
+    POSTGRES_HOST: postgresql
+    POSTGRES_PORT: 5432
+    POSTGRES_DB_NAME: aviralworld-test
+  
+    BACKEND_DB_CONNECTION_STRING: "postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB_NAME"
+  before_script:
+    - apk add openssl-dev musl-dev
+  script:
+    - cargo test
+  only:
+    - merge_requests
+  interruptible: yes
+
+docker:
+  stage: docker
+  script:
+    - echo TODO && exit 1
