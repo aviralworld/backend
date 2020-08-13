@@ -2,6 +2,7 @@
 # <https://dev.to/deciduously/use-multi-stage-docker-builds-for-statically-linked-rust-binaries-3jgd>
 FROM rust:1.45.2-alpine AS builder
 ENV USER=backend
+ENV CARGO_INCREMENTAL=0
 WORKDIR /usr/src
 RUN apk add openssl-dev musl-dev
 RUN cargo new backend
