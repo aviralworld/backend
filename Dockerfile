@@ -4,14 +4,17 @@ FROM rust:1.45.2-alpine AS builder
 ENV USER=backend
 ENV CARGO_INCREMENTAL=0
 WORKDIR /usr/src
-RUN apk add openssl-dev musl-dev
+
+# TODO remove ffmpeg once `ffmpeg-next` is integrated
+RUN apk add --quiet openssl-dev musl-dev ffmpeg
+
 RUN cargo new backend
 WORKDIR /usr/src/backend
 COPY Cargo.toml Cargo.lock ./
 RUN cargo build --release
 
-COPY migrations src tests ./
-RUN cargo install --path .
+COPY src ./
+RUN cargo install --path . --frozen --offline
 
 FROM scratch
 COPY --from=builder /usr/local/cargo/bin/backend .
