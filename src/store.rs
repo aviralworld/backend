@@ -73,9 +73,9 @@ impl S3Store {
         };
 
         let bucket = get_variable("S3_BUCKET_NAME");
-        let content_type = get_variable("S3_CONTENT_TYPE");
-        let acl = get_variable("S3_ACL");
-        let cache_control = get_variable("S3_CACHE_CONTROL");
+        let content_type = get_variable("BACKEND_S3_CONTENT_TYPE");
+        let acl = get_variable("BACKEND_S3_ACL");
+        let cache_control = get_variable("BACKEND_S3_CACHE_CONTROL");
 
         let client = Arc::new(S3Client::new_with(
             HttpClient::new()?,
