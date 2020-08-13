@@ -10,11 +10,12 @@ use slog_async;
 use slog_json;
 use sqlx;
 use tokio;
+use warp::Filter;
 
 use backend::audio;
 use backend::config::get_variable;
 use backend::db::PgDb;
-use backend::routes::make_upload_route;
+use backend::routes;
 use backend::store::S3Store;
 use backend::urls::Urls;
 
@@ -22,7 +23,7 @@ use backend::urls::Urls;
 async fn main() -> Result<(), Box<dyn Error>> {
     dotenv::dotenv().ok();
 
-    let store = S3Store::from_env().expect("initialize S3 store from environment");
+    let store = Arc::new(S3Store::from_env().expect("initialize S3 store from environment"));
 
     let enable_warp_logging = get_variable("BACKEND_ENABLE_WARP_LOGGING");
 
@@ -35,30 +36,45 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let ffprobe_path = env::var("BACKEND_FFPROBE_PATH").ok();
     let expected_codec = get_variable("BACKEND_MEDIA_CODEC");
     let expected_format = get_variable("BACKEND_MEDIA_FORMAT");
-    let checker = audio::make_wrapper(
+    let checker = Arc::new(audio::make_wrapper(
         logger.clone(),
         ffprobe_path,
         expected_codec,
         expected_format,
-    );
+    ));
 
     let connection_string = get_variable("BACKEND_DB_CONNECTION_STRING");
     let pool = sqlx::Pool::new(&connection_string)
         .await
         .expect("create database pool from BACKEND_DB_CONNECTION_STRING");
-    let db = PgDb::new(pool);
+    let db = Arc::new(PgDb::new(pool));
 
-    let urls = Urls::new(
+    let urls = Arc::new(Urls::new(
         get_variable("BACKEND_BASE_URL"),
         get_variable("BACKEND_RECORDINGS_PATH"),
+    ));
+
+    let count_route = routes::make_count_route(logger.clone(), db.clone(), urls.clone());
+    let upload_route = routes::make_upload_route(
+        logger.clone(),
+        db.clone(),
+        store.clone(),
+        checker.clone(),
+        urls.clone(),
     );
-    let routes = make_upload_route(
-        logger,
-        Arc::new(db),
-        Arc::new(store),
-        Arc::new(checker),
-        Arc::new(urls),
-    );
+    let children_route = routes::make_children_route(logger.clone(), db.clone(), urls.clone());
+    let delete_route =
+        routes::make_delete_route(logger.clone(), db.clone(), store.clone(), urls.clone());
+    let retrieve_route = routes::make_retrieve_route(logger.clone(), db.clone(), urls.clone());
+    let hide_route = routes::make_hide_route(logger.clone(), db.clone(), urls.clone());
+
+    let routes = count_route
+        .or(upload_route)
+        .or(children_route)
+        .or(delete_route)
+        .or(retrieve_route)
+        .or(hide_route);
+
     warp::serve(routes).run(([127, 0, 0, 1], 3030)).await;
 
     Ok(())
