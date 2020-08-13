@@ -8,6 +8,8 @@ from flask_dotenv import DotEnv
 from flask_marshmallow import Marshmallow
 from flask_migrate import Migrate
 from flask_uuid import FlaskUUID
+from marshmallow_enum import EnumField
+from marshmallow_sqlalchemy import auto_field
 import uuid
 
 from sqlalchemy.dialects.postgresql import UUID
@@ -77,9 +79,13 @@ class Gender(db.Model):
 class RecordingSchema(ma.SQLAlchemySchema):
     class Meta:
         model = Recording
-        fields = ("name", "category_id", "privacy", "age_id", "gender_id", "location", "occupation", "parent_id")
+        fields = ("id", "name", "category_id", "privacy", "age_id", "gender_id", "location", "occupation", "parent_id")
+
+    id = auto_field(dump_only=True)
+    privacy = EnumField(Privacy)
 
 recording_schema = RecordingSchema()
+recordings_schema = RecordingSchema(many=True)
 
 class NewRecordingResource(Resource):
     def post(self):
@@ -109,9 +115,25 @@ api.add_resource(NewRecordingResource, "/recordings/")
 
 class RecordingResource(Resource):
     def get(self, id):
-        pass
+        recording = db.session.query(Recording).get(id)
+
+        if recording:
+            return recording_schema.dump(recording), 200
+
+        return None, 404
 
 api.add_resource(RecordingResource, "/recordings/<uuid:id>/")
+
+class RecordingChildrenResource(Resource):
+    def get(self, parent_id):
+        recordings = db.session.query(Recording).filter(Recording.parent_id == parent_id).all()
+
+        if len(recordings) > 0:
+            return recordings_schema.dump(recordings), 200
+
+        return None, 404
+
+api.add_resource(RecordingChildrenResource, "/recordings/<uuid:parent_id>/children/")
 
 if __name__ == "__main__":
     app.run(debug=True)
