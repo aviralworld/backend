@@ -51,6 +51,8 @@ pub struct ActiveRecording {
 }
 
 impl ActiveRecording {
+    // TODO revisit whether we can get around the lint
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: Uuid,
         times: Times,

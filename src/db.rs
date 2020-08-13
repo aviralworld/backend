@@ -56,7 +56,7 @@ mod postgres {
     // all of these forward to async functions until async fn in traits is supported
     impl super::Db for PgDb {
         fn children(&self, id: &Uuid) -> BoxFuture<Result<Vec<ChildRecording>, BackendError>> {
-            children(id.clone(), &self.pool).boxed()
+            children(*id, &self.pool).boxed()
         }
 
         fn count_all(&self) -> BoxFuture<Result<i64, BackendError>> {
@@ -64,11 +64,11 @@ mod postgres {
         }
 
         fn delete(&self, id: &Uuid) -> BoxFuture<Result<(), BackendError>> {
-            delete(id.clone(), &self.pool).boxed()
+            delete(*id, &self.pool).boxed()
         }
 
         fn hide(&self, id: &Uuid) -> BoxFuture<Result<(), BackendError>> {
-            hide(id.clone(), &self.pool).boxed()
+            hide(*id, &self.pool).boxed()
         }
 
         fn insert(
@@ -79,11 +79,11 @@ mod postgres {
         }
 
         fn retrieve(&self, id: &Uuid) -> BoxFuture<Result<Option<Recording>, BackendError>> {
-            retrieve(id.clone(), &self.pool).boxed()
+            retrieve(*id, &self.pool).boxed()
         }
 
         fn update_url(&self, id: &Uuid, url: &Url) -> BoxFuture<Result<(), BackendError>> {
-            update_url(id.clone(), url.clone(), &self.pool).boxed()
+            update_url(*id, url.clone(), &self.pool).boxed()
         }
     }
 

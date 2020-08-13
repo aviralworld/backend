@@ -17,7 +17,7 @@ pub struct Urls {
 impl Urls {
     /// Create a new instance. `recordings_prefix` should *not* include a trailing slash.
     pub fn new(base: impl AsRef<str>, recordings_prefix: impl Into<String>) -> Self {
-        let base = Url::parse(base.as_ref()).expect(&format!("parse {} as URL", base.as_ref()));
+        let base = Url::parse(base.as_ref()).unwrap_or_else(|_| panic!("parse {} as URL", base.as_ref()));
         let recordings_path = recordings_prefix.into();
         let recordings_prefix = format!("{}/", recordings_path);
 
@@ -38,6 +38,6 @@ impl Urls {
         let id = format!("{}", id);
         self.recordings()
             .join(&id)
-            .expect(&format!("get URL for recording {}", id))
+            .unwrap_or_else(|_| panic!("get URL for recording {}", id))
     }
 }

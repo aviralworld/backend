@@ -94,7 +94,7 @@ mod inner {
 
             let output_path = {
                 let mut output =
-                    NamedTempFile::new().map_err(|e| BackendError::TemporaryFileError(e))?;
+                    NamedTempFile::new().map_err(BackendError::TemporaryFileError)?;
                 output
                     .write_all(data)
                     .map_err(BackendError::TemporaryFileError)?;

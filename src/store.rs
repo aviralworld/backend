@@ -103,7 +103,7 @@ impl Store for S3Store {
     type Raw = Vec<u8>;
 
     fn delete<'a>(&self, key: &'a Uuid) -> BoxFuture<Result<(), BackendError>> {
-        delete(self, key.clone()).boxed()
+        delete(self, *key).boxed()
     }
 
     fn get_url<'a>(&self, key: &'a Uuid) -> Result<Url, ParseError> {
@@ -111,7 +111,7 @@ impl Store for S3Store {
     }
 
     fn save<'a>(&self, key: &Uuid, raw: Vec<u8>) -> BoxFuture<Result<(), BackendError>> {
-        upload(self, key.clone(), raw).boxed()
+        upload(self, *key, raw).boxed()
     }
 }
 

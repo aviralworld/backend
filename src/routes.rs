@@ -51,7 +51,6 @@ pub fn make_count_route<'a>(
     db: Arc<impl Db + Sync + Send + 'a>,
     urls: Arc<Urls>,
 ) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
-    let db = db.clone();
     let logger1 = logger.clone();
     let logger2 = logger.clone();
 
@@ -76,12 +75,8 @@ pub fn make_upload_route<'a, O: 'a>(
     checker: Arc<impl Fn(&[u8]) -> Result<(), BackendError> + Send + Sync + 'a>,
     urls: Arc<Urls>,
 ) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
-    let store = store.clone();
-    let db = db.clone();
     let logger1 = logger.clone();
     let logger2 = logger.clone();
-    let checker = checker.clone();
-    let urls = urls.clone();
 
     // TODO this should stream the body from the request, but warp
     // doesn't support that yet; however, see
@@ -111,10 +106,8 @@ pub fn make_children_route<'a>(
     db: Arc<impl Db + Sync + Send + 'a>,
     urls: Arc<Urls>,
 ) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
-    let db = db.clone();
     let logger1 = logger.clone();
     let logger2 = logger.clone();
-    let urls = urls.clone();
 
     let recordings_path = urls.recordings_path.clone();
 
@@ -136,11 +129,8 @@ pub fn make_delete_route<'a, O: 'a>(
     store: Arc<impl Store<Output = O, Raw = Vec<u8>> + 'a>,
     urls: Arc<Urls>,
 ) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
-    let db = db.clone();
-    let store = store.clone();
     let logger1 = logger.clone();
     let logger2 = logger.clone();
-    let urls = urls.clone();
 
     let recordings_path = urls.recordings_path.clone();
 
@@ -162,10 +152,8 @@ pub fn make_retrieve_route<'a>(
     db: Arc<impl Db + Sync + Send + 'a>,
     urls: Arc<Urls>,
 ) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
-    let db = db.clone();
     let logger1 = logger.clone();
     let logger2 = logger.clone();
-    let urls = urls.clone();
 
     let recordings_path = urls.recordings_path.clone();
 
@@ -187,10 +175,8 @@ pub fn make_hide_route<'a>(
     db: Arc<impl Db + Sync + Send + 'a>,
     urls: Arc<Urls>,
 ) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
-    let db = db.clone();
     let logger1 = logger.clone();
     let logger2 = logger.clone();
-    let urls = urls.clone();
 
     let recordings_path = urls.recordings_path.clone();
 
@@ -274,7 +260,7 @@ async fn get_children(
     let id = Uuid::parse_str(&parent)
         .map_err(|_| BackendError::InvalidId(parent.clone()))
         .map_err(error_handler)?;
-    debug!(logger, "Searching for children..."; "parent" => format!("{}", &parent));
+    debug!(logger, "Searching for children..."; "parent" => &parent.to_string());
 
     let children = db.children(&id).await.map_err(error_handler)?;
     let response = SuccessResponse::Children { parent, children };
@@ -385,7 +371,7 @@ async fn save_recording_metadata(
         .await
         .map_err(|_| BackendError::MalformedFormSubmission)?;
     let metadata: UploadMetadata = serde_json::from_slice(&raw_metadata)
-        .map_err(|e| BackendError::MalformedUploadMetadata(e))?;
+        .map_err(BackendError::MalformedUploadMetadata)?;
 
     let new_recording = db.insert(metadata).await?;
     let id = new_recording.id();

@@ -3,13 +3,7 @@ use std::error::Error;
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use dotenv;
-use pretty_env_logger;
 use slog::Drain;
-use slog_async;
-use slog_json;
-use sqlx;
-use tokio;
 use warp::Filter;
 
 use backend::audio;

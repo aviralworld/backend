@@ -2,8 +2,6 @@ use std::io;
 
 use rusoto_core::RusotoError;
 use rusoto_s3::{DeleteObjectError, PutObjectError};
-use serde_json;
-use sqlx;
 use thiserror::Error;
 use uuid::Uuid;
 
