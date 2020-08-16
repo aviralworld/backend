@@ -1,20 +1,22 @@
-FROM python:3.7-alpine AS base
+# adapted from
+# <https://dev.to/deciduously/use-multi-stage-docker-builds-for-statically-linked-rust-binaries-3jgd>
+FROM rust:1.45.2-alpine AS builder
+ENV USER=backend
+ENV CARGO_INCREMENTAL=0
+WORKDIR /usr/src
 
-FROM base AS builder
+# TODO remove ffmpeg once `ffmpeg-next` is integrated
+RUN apk add --quiet openssl-dev musl-dev ffmpeg
 
-RUN mkdir /install
-WORKDIR /install
+RUN cargo new backend
+WORKDIR /usr/src/backend
+COPY Cargo.toml Cargo.lock ./
+RUN cargo build --release
 
-COPY requirements.txt /requirements.txt
+COPY src ./
+RUN cargo install --path . --frozen --offline
 
-RUN pip install --install-option="--prefix=/install" -r /requirements.txt
-
-FROM base
-
-COPY --from=builder /install /usr/local
-
-COPY . /app
-
-WORKDIR /app
-
-ENTRYPOINT ["python", "app.py"]
+FROM scratch
+COPY --from=builder /usr/local/cargo/bin/backend .
+USER 1000
+CMD ["./backend"]
