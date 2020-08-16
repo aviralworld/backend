@@ -3,6 +3,7 @@ use std::error::Error;
 use std::sync::Arc;
 use std::sync::Mutex;
 
+use cfg_if::cfg_if;
 use slog::Drain;
 use warp::Filter;
 
@@ -17,13 +18,13 @@ use backend::urls::Urls;
 async fn main() -> Result<(), Box<dyn Error>> {
     dotenv::dotenv().ok();
 
-    let store = Arc::new(S3Store::from_env().expect("initialize S3 store from environment"));
-
-    let enable_warp_logging = get_variable("BACKEND_ENABLE_WARP_LOGGING");
-
-    if enable_warp_logging == "1" {
-        pretty_env_logger::init();
+    cfg_if! {
+        if #[cfg(enable_warp_logging)] {
+            pretty_env_logger::init();
+        }
     }
+
+    let store = Arc::new(S3Store::from_env().expect("initialize S3 store from environment"));
 
     let logger = Arc::new(initialize_logger());
 
