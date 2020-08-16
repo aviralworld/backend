@@ -524,7 +524,7 @@ fn read_config() {
     static INITIALIZED_CONFIG: Once = Once::new();
 
     INITIALIZED_CONFIG.call_once(|| {
-        dotenv::dotenv().expect("read .env");
+        dotenv::dotenv().ok();
     });
 }
 

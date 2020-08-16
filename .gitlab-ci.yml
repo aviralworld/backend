@@ -20,6 +20,11 @@ test:
         - Cargo.toml
         - Cargo.lock
   variables:
+    # silence apt-get
+    DEBIAN_FRONTEND: noninteractive
+
+    CARGO_HOME: .cargo
+
     # credentials (not required for testing)
     S3_ACCESS_KEY: ""
     S3_SECRET_ACCESS_KEY: ""
