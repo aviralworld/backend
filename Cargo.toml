@@ -50,6 +50,5 @@ slog-stdlog = "4.0.0"
 
 [profile.release]
 lto = true
-panic = "abort"
 codegen-units = 1
 incremental = false
