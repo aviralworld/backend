@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 use cfg_if::cfg_if;
-use slog::Drain;
+use slog::{info, Drain};
 use warp::Filter;
 
 use backend::audio;
@@ -26,7 +26,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let store = Arc::new(S3Store::from_env().expect("initialize S3 store from environment"));
 
-    let logger = Arc::new(initialize_logger());
+    let logger = initialize_logger();
+    info!(logger, "Starting...");
+    let logger = Arc::new(logger);
 
     let ffprobe_path = env::var("BACKEND_FFPROBE_PATH").ok();
     let expected_codec = get_variable("BACKEND_MEDIA_CODEC");
