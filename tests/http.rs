@@ -10,7 +10,7 @@ use slog::{self, o, Logger};
 use url::Url;
 use warp::http::StatusCode;
 
-use backend::config::get_variable;
+use backend::config::{get_ffprobe, get_variable};
 use backend::db::Db;
 use backend::errors;
 use backend::routes;
@@ -552,7 +552,7 @@ fn make_wrapper_for_test(
 
     audio::make_wrapper(
         logger.clone(),
-        env::var("BACKEND_FFPROBE_PATH").ok(),
+        get_ffprobe(env::var("BACKEND_FFPROBE_PATH").ok()),
         env::var("BACKEND_MEDIA_CODEC")
             .expect("must define BACKEND_MEDIA_CODEC environment variable"),
         env::var("BACKEND_MEDIA_FORMAT")

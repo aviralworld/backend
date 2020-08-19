@@ -34,8 +34,10 @@ unicode-normalization = "0.1.12"
 url = { version = "2.1.1", features = ["serde"] }
 uuid = { version = "0.8.1", features = [ "serde", "v4" ] }
 warp = "0.2.3"
+which = { version = "4.0.2", optional = true }
 
 [features]
+default = ["which"]
 enable_warp_logging = ["pretty_env_logger"]
 use_ffmpeg_sys = ["ffmpeg-next"]
 

@@ -8,6 +8,7 @@ use slog::{info, Drain};
 use warp::Filter;
 
 use backend::audio;
+use backend::config::get_ffprobe;
 use backend::config::get_variable;
 use backend::db::PgDb;
 use backend::routes;
@@ -30,7 +31,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     info!(logger, "Starting...");
     let logger = Arc::new(logger);
 
-    let ffprobe_path = env::var("BACKEND_FFPROBE_PATH").ok();
+    let ffprobe_path = get_ffprobe(env::var("BACKEND_FFPROBE_PATH").ok());
     let expected_codec = get_variable("BACKEND_MEDIA_CODEC");
     let expected_format = get_variable("BACKEND_MEDIA_FORMAT");
     let checker = Arc::new(audio::make_wrapper(
@@ -86,5 +87,5 @@ fn initialize_logger() -> slog::Logger {
     let drain = Mutex::new(Json::default(std::io::stderr())).map(Fuse);
     let drain = Async::new(drain).build().fuse();
 
-    Logger::root(drain, o!("version" => env!("CARGO_PKG_VERSION")))
+    Logger::root(drain, o!("version" => env!("CARGO_PKG_VERSION"), "revision" => option_env!("BACKEND_REVISION")))
 }
