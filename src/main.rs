@@ -83,9 +83,19 @@ fn initialize_logger() -> slog::Logger {
     use slog_async::Async;
     use slog_json::Json;
 
+    #[cfg(enable_warp_logging)]
+    static mut SLOG_SCOPE_GUARD: Option<slog_envlogger::EnvLogger> = None;
+
     // TODO is this the correct sequence?
     let drain = Mutex::new(Json::default(std::io::stderr())).map(Fuse);
     let drain = Async::new(drain).build().fuse();
+
+    cfg_if! {
+        if #[cfg(enable_warp_logging)] {
+            debug!(logger, "Setting up Warp logging...");
+            SLOG_SCOPE_GUARD = slog_envlogger::new(drain);
+        }
+    }
 
     Logger::root(drain, o!("version" => env!("CARGO_PKG_VERSION"), "revision" => option_env!("BACKEND_REVISION")))
 }
