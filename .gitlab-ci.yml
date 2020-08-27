@@ -94,4 +94,4 @@ docker:
     - export build_timestamp=`date +%Y%m%d%H%M%S`
     - /kaniko/executor --context $CI_PROJECT_DIR --dockerfile $CI_PROJECT_DIR/Dockerfile --cache=true --destination=$CI_REGISTRY_IMAGE:$build_timestamp --destination=$CI_REGISTRY_IMAGE:latest --build-arg BACKEND_REVISION=$CI_COMMIT_SHA
   only:
-    - merge_requests
+    - master
