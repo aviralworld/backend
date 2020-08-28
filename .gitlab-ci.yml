@@ -76,5 +76,22 @@ test:
 
 docker:
   stage: docker
+  variables:
+    KANIKO_AUTH_CONFIG: >-
+        {
+          "auths": {
+            "$CI_REGISTRY": {
+              "username": "$CI_REGISTRY_USER",
+              "password": "$CI_REGISTRY_PASSWORD"
+            }
+          }
+        }
+  image:
+    name: gcr.io/kaniko-project/executor:debug
+    entrypoint: [""]
   script:
-    - echo TODO && exit 1
+    - echo $KANIKO_AUTH_CONFIG > /kaniko/.docker/config.json
+    - export build_timestamp=`date +%Y%m%d%H%M%S`
+    - /kaniko/executor --context $CI_PROJECT_DIR --dockerfile $CI_PROJECT_DIR/Dockerfile --cache=true --destination=$CI_REGISTRY_IMAGE:$build_timestamp --destination=$CI_REGISTRY_IMAGE:latest --build-arg BACKEND_REVISION=$CI_COMMIT_SHA
+  only:
+    - master

@@ -1,3 +1,4 @@
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use slog::Logger;
@@ -13,12 +14,12 @@ pub trait CodecChecker {
         expected_format: &str,
     ) -> Result<(), BackendError>;
 
-    fn new(ffprobe_path: Option<String>) -> Self;
+    fn new(ffprobe_path: Option<impl AsRef<Path>>) -> Self;
 }
 
 pub fn make_wrapper(
     logger: Arc<Logger>,
-    ffprobe_path: Option<String>,
+    ffprobe_path: Option<PathBuf>,
     expected_codec: String,
     expected_format: String,
 ) -> impl Fn(&[u8]) -> Result<(), BackendError> {
@@ -35,7 +36,7 @@ pub fn make_wrapper(
 #[cfg(not(use_ffmpeg_sys))]
 mod inner {
     use std::ffi::OsString;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::sync::Arc;
 
     use lazy_static::lazy_static;
@@ -134,11 +135,9 @@ mod inner {
             })
         }
 
-        fn new(path: Option<String>) -> Self {
+        fn new(path: Option<impl AsRef<Path>>) -> Self {
             Checker {
-                ffprobe: PathBuf::from(
-                    path.expect("must provide ffprobe path or use ffmpeg library"),
-                ),
+                ffprobe: path.expect("must provide ffprobe path or use ffmpeg library").as_ref().to_owned(),
             }
         }
     }

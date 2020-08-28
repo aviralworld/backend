@@ -4,10 +4,11 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 use cfg_if::cfg_if;
-use slog::Drain;
+use slog::{info, Drain};
 use warp::Filter;
 
 use backend::audio;
+use backend::config::get_ffprobe;
 use backend::config::get_variable;
 use backend::db::PgDb;
 use backend::routes;
@@ -26,9 +27,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let store = Arc::new(S3Store::from_env().expect("initialize S3 store from environment"));
 
-    let logger = Arc::new(initialize_logger());
+    let logger = initialize_logger();
+    info!(logger, "Starting...");
+    let logger = Arc::new(logger);
 
-    let ffprobe_path = env::var("BACKEND_FFPROBE_PATH").ok();
+    let ffprobe_path = get_ffprobe(env::var("BACKEND_FFPROBE_PATH").ok());
     let expected_codec = get_variable("BACKEND_MEDIA_CODEC");
     let expected_format = get_variable("BACKEND_MEDIA_FORMAT");
     let checker = Arc::new(audio::make_wrapper(
@@ -80,9 +83,19 @@ fn initialize_logger() -> slog::Logger {
     use slog_async::Async;
     use slog_json::Json;
 
+    #[cfg(enable_warp_logging)]
+    static mut SLOG_SCOPE_GUARD: Option<slog_envlogger::EnvLogger> = None;
+
     // TODO is this the correct sequence?
     let drain = Mutex::new(Json::default(std::io::stderr())).map(Fuse);
     let drain = Async::new(drain).build().fuse();
 
-    Logger::root(drain, o!("version" => env!("CARGO_PKG_VERSION")))
+    cfg_if! {
+        if #[cfg(enable_warp_logging)] {
+            debug!(logger, "Setting up Warp logging...");
+            SLOG_SCOPE_GUARD = slog_envlogger::new(drain);
+        }
+    }
+
+    Logger::root(drain, o!("version" => env!("CARGO_PKG_VERSION"), "revision" => option_env!("BACKEND_REVISION")))
 }
