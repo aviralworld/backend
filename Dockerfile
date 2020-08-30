@@ -1,26 +1,23 @@
-# TODO adopt multi-stage Dockerfile for statically linked build
+FROM ekidd/rust-musl-builder:1.46.0 AS builder
 
-# this was initially based on
-# <https://dev.to/deciduously/use-multi-stage-docker-builds-for-statically-linked-rust-binaries-3jgd>,
-# but somewhere along the way some library caused problems with static
-# linking and Alpine Linux
-
-FROM rust:1.45.2 AS builder
 ARG BACKEND_REVISION
-ENV USER=backend
 ENV BACKEND_REVISION=$BACKEND_REVISION
 ENV CARGO_INCREMENTAL=0
-WORKDIR /usr/src
+ENV USER=rust
 
-# TODO remove ffmpeg once `ffmpeg-next` is integrated
-RUN apt-get update -qqy && apt-get -qqy install libssl-dev ffmpeg
-
+WORKDIR /home/rust/src
 RUN cargo new backend
-WORKDIR /usr/src/backend
+WORKDIR /home/rust/src/backend
 COPY Cargo.toml Cargo.lock ./
-RUN cargo build --release --locked
+RUN OPENSSL_LIB_DIR=/usr/local/musl/lib/ OPENSSL_INCLUDE_DIR=/usr/local/musl/include OPENSSL_STATIC=1 cargo build --target x86_64-unknown-linux-musl --release --locked
 
 COPY src ./src
-RUN cargo install --path . --frozen --offline
+RUN OPENSSL_LIB_DIR=/usr/local/musl/lib/ OPENSSL_INCLUDE_DIR=/usr/local/musl/include OPENSSL_STATIC=1 cargo build --target x86_64-unknown-linux-musl --release --frozen --offline
 
-CMD ["/usr/local/cargo/bin/backend"]
+FROM scratch
+# TODO add ffmpeg
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+ENV SSL_CERT_DIR=/etc/ssl/certs/
+COPY --from=builder /home/rust/src/backend/target/x86_64-unknown-linux-musl/release/backend /usr/app/backend
+USER 1000
+CMD ["/usr/app/backend"]
