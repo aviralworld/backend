@@ -38,3 +38,5 @@ CREATE TABLE IF NOT EXISTS "recordings" (
     CONSTRAINT recordings_primary_key PRIMARY KEY (id),
     CONSTRAINT recordings_name UNIQUE (NAME)
 );
+
+CREATE INDEX "parent_index" ON "recordings" ("parent_id") WHERE "parent_id" IS NOT NULL;
