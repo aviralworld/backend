@@ -5,6 +5,17 @@ stages:
   - check
   - docker
 
+style:
+  stage: check
+  image: rust:1.45.2-alpine
+  before_script:
+    - rustup component add rustfmt
+  script:
+    - cargo fmt -- --check
+  only:
+    - merge_requests
+  interruptible: yes
+
 test:
   stage: check
   services:
