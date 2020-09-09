@@ -76,6 +76,7 @@ test:
     # TODO also test with `ffmpeg-next`
     - apt-get -o=Dpkg::Use-Pty=0 -qqy update && apt-get -o=Dpkg::Use-Pty=0 -qqy install libssl-dev pkg-config ffmpeg libsqlite3-dev postgresql-client
     - PGPASSWORD=$POSTGRES_PASSWORD createdb -h $POSTGRES_HOST -p $POSTGRES_PORT -U $POSTGRES_USER $POSTGRES_DB_NAME
+    - rustup default stable
     - rustup component add clippy
   script:
     - cargo fetch
