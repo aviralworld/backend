@@ -253,7 +253,7 @@ async fn get_children<O: Clone + Send + Sync>(
 }
 
 async fn delete_recording<O: Clone + Send + Sync>(
-environment: Environment<O>,
+    environment: Environment<O>,
     id: String,
 ) -> Result<StatusCode, reject::Rejection> {
     let error_handler =
@@ -271,7 +271,7 @@ environment: Environment<O>,
 }
 
 async fn retrieve_recording<O: Clone + Send + Sync>(
-environment: Environment<O>,
+    environment: Environment<O>,
     id: String,
 ) -> Result<WithStatus<Json>, reject::Rejection> {
     use crate::recording::Recording;
@@ -300,7 +300,7 @@ environment: Environment<O>,
 }
 
 async fn hide_recording<O: Clone + Send + Sync>(
-environment: Environment<O>,
+    environment: Environment<O>,
     id: String,
 ) -> Result<StatusCode, reject::Rejection> {
     let error_handler =

@@ -94,8 +94,7 @@ mod inner {
             use tempfile::NamedTempFile;
 
             let output_path = {
-                let mut output =
-                    NamedTempFile::new().map_err(BackendError::TemporaryFileError)?;
+                let mut output = NamedTempFile::new().map_err(BackendError::TemporaryFileError)?;
                 output
                     .write_all(data)
                     .map_err(BackendError::TemporaryFileError)?;
@@ -137,7 +136,10 @@ mod inner {
 
         fn new(path: Option<impl AsRef<Path>>) -> Self {
             Checker {
-                ffprobe: path.expect("must provide ffprobe path or use ffmpeg library").as_ref().to_owned(),
+                ffprobe: path
+                    .expect("must provide ffprobe path or use ffmpeg library")
+                    .as_ref()
+                    .to_owned(),
             }
         }
     }

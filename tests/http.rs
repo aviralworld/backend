@@ -486,9 +486,7 @@ fn parse_children_ids(body: &[u8]) -> Vec<String> {
         .collect::<Vec<_>>()
 }
 
-async fn make_environment(
-    test_name: String,
-) -> Environment<()> {
+async fn make_environment(test_name: String) -> Environment<()> {
     read_config();
     initialize_global_logger();
 
@@ -498,7 +496,13 @@ async fn make_environment(
     let checker = make_wrapper_for_test(logger_arc.clone());
     let db = make_db().await;
 
-    Environment::new(logger_arc, Arc::new(db), Arc::new(Urls::new("https://www.example.com/", "recs")), Arc::new(make_store()), Arc::new(checker))
+    Environment::new(
+        logger_arc,
+        Arc::new(db),
+        Arc::new(Urls::new("https://www.example.com/", "recs")),
+        Arc::new(make_store()),
+        Arc::new(checker),
+    )
 }
 
 fn make_store() -> S3Store {

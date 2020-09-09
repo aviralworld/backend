@@ -58,8 +58,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let count_route = routes::make_count_route(environment.clone());
     let upload_route = routes::make_upload_route(environment.clone());
     let children_route = routes::make_children_route(environment.clone());
-    let delete_route =
-        routes::make_delete_route(environment.clone());
+    let delete_route = routes::make_delete_route(environment.clone());
     let retrieve_route = routes::make_retrieve_route(environment.clone());
     let hide_route = routes::make_hide_route(environment.clone());
 

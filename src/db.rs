@@ -105,12 +105,9 @@ mod postgres {
     async fn count_all(pool: &PgPool) -> Result<i64, BackendError> {
         use sqlx::prelude::*;
 
-        let query = sqlx::query_as::<_, (i64, )>(include_str!("queries/count.sql"));
+        let query = sqlx::query_as::<_, (i64,)>(include_str!("queries/count.sql"));
 
-        let (count, ) = query
-            .fetch_one(pool)
-            .await
-            .map_err(map_sqlx_error)?;
+        let (count,) = query.fetch_one(pool).await.map_err(map_sqlx_error)?;
 
         Ok(count)
     }

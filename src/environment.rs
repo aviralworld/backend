@@ -18,11 +18,12 @@ pub struct Environment<O: Clone + Send + Sync> {
 
 impl<O: Clone + Send + Sync> Environment<O> {
     pub fn new(
-    logger: Arc<Logger>,
-    db: Arc<dyn Db + Send + Sync>,
-    urls: Arc<Urls>,
-    store: Arc<dyn Store<Output = O, Raw = Vec<u8>> + Send + Sync>,
-    checker: Arc<dyn Fn(&[u8]) -> Result<(), BackendError> + Send + Sync>,) -> Self {
+        logger: Arc<Logger>,
+        db: Arc<dyn Db + Send + Sync>,
+        urls: Arc<Urls>,
+        store: Arc<dyn Store<Output = O, Raw = Vec<u8>> + Send + Sync>,
+        checker: Arc<dyn Fn(&[u8]) -> Result<(), BackendError> + Send + Sync>,
+    ) -> Self {
         Self {
             logger,
             db,
