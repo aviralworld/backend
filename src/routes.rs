@@ -12,15 +12,13 @@ use warp::reply::{json, with_header, with_status, Json, Reply, WithHeader, WithS
 use warp::Filter;
 
 use crate::db::Db;
+use crate::environment::Environment;
 use crate::errors::BackendError;
 use crate::io::parse_upload;
 use crate::recording::{ChildRecording, UploadMetadata};
 use crate::store::Store;
-use crate::urls::Urls;
 
 mod rejection;
-
-// TODO count
 
 #[derive(Debug, Serialize)]
 #[serde(untagged)]
@@ -43,73 +41,52 @@ const MAX_CONTENT_LENGTH: u64 = 2 * 1024 * 1024 * 1024;
 // in the mean time, we have to use `BoxFuture` and forward to real
 // `async fn`s if we want to use `async`/`await`
 
-// TODO accept environment as single `Environment` struct (causes all
-// sorts of reference and lifetime issues)
-
-pub fn make_count_route<'a>(
-    logger: Arc<Logger>,
-    db: Arc<impl Db + Sync + Send + 'a>,
-    urls: Arc<Urls>,
+pub fn make_count_route<'a, O: Clone + Send + Sync + 'a>(
+    environment: Environment<O>,
 ) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
-    let logger1 = logger.clone();
-    let logger2 = logger.clone();
-
-    let recordings_path = urls.recordings_path.clone();
+    let recordings_path = environment.urls.recordings_path.clone();
+    let logger = environment.logger.clone();
 
     warp::path(recordings_path)
         .and(warp::path("count"))
         .and(warp::path::end())
         .and(warp::get())
-        .and_then(
-            move || -> BoxFuture<Result<Json, reject::Rejection>> {
-                get_recording_count(logger1.clone(), db.clone()).boxed()
-            },
-        )
-        .recover(move |r| format_rejection(logger2.clone(), r))
+        .and_then(move || -> BoxFuture<Result<Json, reject::Rejection>> {
+            get_recording_count(environment.clone()).boxed()
+        })
+        .recover(move |r| format_rejection(logger.clone(), r))
 }
 
-pub fn make_upload_route<'a, O: 'a>(
-    logger: Arc<Logger>,
-    db: Arc<impl Db + Sync + Send + 'a>,
-    store: Arc<impl Store<Output = O, Raw = Vec<u8>> + 'a>,
-    checker: Arc<impl Fn(&[u8]) -> Result<(), BackendError> + Send + Sync + 'a>,
-    urls: Arc<Urls>,
+pub fn make_upload_route<'a, O: Clone + Send + Sync + 'a>(
+    environment: Environment<O>,
 ) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
-    let logger1 = logger.clone();
-    let logger2 = logger.clone();
+    let logger = environment.logger.clone();
 
     // TODO this should stream the body from the request, but warp
     // doesn't support that yet; however, see
     // <https://github.com/cetra3/mpart-async>
-    warp::path(urls.recordings_path.clone())
+    warp::path(environment.urls.recordings_path.clone())
         .and(warp::path::end())
         .and(warp::post())
         .and(form().max_length(MAX_CONTENT_LENGTH))
         .and_then(
             move |content: FormData| -> BoxFuture<Result<WithHeader<WithStatus<Json>>, reject::Rejection>> {
                 process_upload(
-                    logger1.clone(),
-                    db.clone(),
-                    store.clone(),
-                    checker.clone(),
-                    urls.clone(),
+                    environment.clone(),
                     content,
                 )
                 .boxed()
             },
         )
-        .recover(move |r| format_rejection(logger2.clone(), r))
+        .recover(move |r| format_rejection(logger.clone(), r))
 }
 
-pub fn make_children_route<'a>(
-    logger: Arc<Logger>,
-    db: Arc<impl Db + Sync + Send + 'a>,
-    urls: Arc<Urls>,
+pub fn make_children_route<'a, O: Clone + Send + Sync + 'a>(
+    environment: Environment<O>,
 ) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
-    let logger1 = logger.clone();
-    let logger2 = logger.clone();
+    let logger = environment.logger.clone();
 
-    let recordings_path = urls.recordings_path.clone();
+    let recordings_path = environment.urls.recordings_path.clone();
 
     warp::path(recordings_path)
         .and(warp::path!("id" / String / "children"))
@@ -117,22 +94,18 @@ pub fn make_children_route<'a>(
         .and(warp::get())
         .and_then(
             move |parent| -> BoxFuture<Result<WithStatus<Json>, reject::Rejection>> {
-                get_children(logger1.clone(), db.clone(), parent).boxed()
+                get_children(environment.clone(), parent).boxed()
             },
         )
-        .recover(move |r| format_rejection(logger2.clone(), r))
+        .recover(move |r| format_rejection(logger.clone(), r))
 }
 
-pub fn make_delete_route<'a, O: 'a>(
-    logger: Arc<Logger>,
-    db: Arc<impl Db + Sync + Send + 'a>,
-    store: Arc<impl Store<Output = O, Raw = Vec<u8>> + 'a>,
-    urls: Arc<Urls>,
+pub fn make_delete_route<'a, O: Clone + Send + Sync + 'a>(
+    environment: Environment<O>,
 ) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
-    let logger1 = logger.clone();
-    let logger2 = logger.clone();
+    let logger = environment.logger.clone();
 
-    let recordings_path = urls.recordings_path.clone();
+    let recordings_path = environment.urls.recordings_path.clone();
 
     warp::path(recordings_path)
         .and(warp::path("id"))
@@ -141,21 +114,18 @@ pub fn make_delete_route<'a, O: 'a>(
         .and(warp::delete())
         .and_then(
             move |id| -> BoxFuture<Result<StatusCode, reject::Rejection>> {
-                delete_recording(logger1.clone(), db.clone(), store.clone(), id).boxed()
+                delete_recording(environment.clone(), id).boxed()
             },
         )
-        .recover(move |r| format_rejection(logger2.clone(), r))
+        .recover(move |r| format_rejection(logger.clone(), r))
 }
 
-pub fn make_retrieve_route<'a>(
-    logger: Arc<Logger>,
-    db: Arc<impl Db + Sync + Send + 'a>,
-    urls: Arc<Urls>,
+pub fn make_retrieve_route<'a, O: Clone + Send + Sync + 'a>(
+    environment: Environment<O>,
 ) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
-    let logger1 = logger.clone();
-    let logger2 = logger.clone();
+    let logger = environment.logger.clone();
 
-    let recordings_path = urls.recordings_path.clone();
+    let recordings_path = environment.urls.recordings_path.clone();
 
     warp::path(recordings_path)
         .and(warp::path("id"))
@@ -164,21 +134,18 @@ pub fn make_retrieve_route<'a>(
         .and(warp::get())
         .and_then(
             move |id| -> BoxFuture<Result<WithStatus<Json>, reject::Rejection>> {
-                retrieve_recording(logger1.clone(), db.clone(), id).boxed()
+                retrieve_recording(environment.clone(), id).boxed()
             },
         )
-        .recover(move |r| format_rejection(logger2.clone(), r))
+        .recover(move |r| format_rejection(logger.clone(), r))
 }
 
-pub fn make_hide_route<'a>(
-    logger: Arc<Logger>,
-    db: Arc<impl Db + Sync + Send + 'a>,
-    urls: Arc<Urls>,
+pub fn make_hide_route<'a, O: Clone + Send + Sync + 'a>(
+    environment: Environment<O>,
 ) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
-    let logger1 = logger.clone();
-    let logger2 = logger.clone();
+    let logger = environment.logger.clone();
 
-    let recordings_path = urls.recordings_path.clone();
+    let recordings_path = environment.urls.recordings_path.clone();
 
     warp::path(recordings_path)
         .and(warp::path("id"))
@@ -188,20 +155,38 @@ pub fn make_hide_route<'a>(
         .and(warp::post())
         .and_then(
             move |id| -> BoxFuture<Result<StatusCode, reject::Rejection>> {
-                hide_recording(logger1.clone(), db.clone(), id).boxed()
+                hide_recording(environment.clone(), id).boxed()
             },
         )
-        .recover(move |r| format_rejection(logger2.clone(), r))
+        .recover(move |r| format_rejection(logger.clone(), r))
 }
 
-async fn process_upload<O>(
-    logger: Arc<Logger>,
-    db: Arc<impl Db>,
-    store: Arc<impl Store<Output = O, Raw = Vec<u8>>>,
-    checker: Arc<impl Fn(&[u8]) -> Result<(), BackendError>>,
-    urls: Arc<Urls>,
+async fn get_recording_count<O: Clone + Send + Sync>(
+    environment: Environment<O>,
+) -> Result<Json, reject::Rejection> {
+    let count = environment
+        .db
+        .count_all()
+        .await
+        .map_err(|e: BackendError| rejection::Rejection::new(rejection::Context::count(), e))?;
+
+    Ok(json(&SuccessResponse::Count(count)))
+}
+
+async fn process_upload<O: Clone + Send + Sync>(
+    environment: Environment<O>,
     content: FormData,
 ) -> Result<WithHeader<WithStatus<Json>>, reject::Rejection> {
+    let Environment {
+        logger,
+        store,
+        db,
+        checker,
+        urls,
+        ..
+    } = environment;
+    let checker = checker.clone();
+
     let error_handler =
         |e: BackendError| rejection::Rejection::new(rejection::Context::upload(None), e);
 
@@ -248,9 +233,8 @@ async fn process_upload<O>(
     ))
 }
 
-async fn get_children(
-    logger: Arc<Logger>,
-    db: Arc<impl Db>,
+async fn get_children<O: Clone + Send + Sync>(
+    environment: Environment<O>,
     parent: String,
 ) -> Result<WithStatus<Json>, reject::Rejection> {
     let error_handler = |e: BackendError| {
@@ -260,18 +244,16 @@ async fn get_children(
     let id = Uuid::parse_str(&parent)
         .map_err(|_| BackendError::InvalidId(parent.clone()))
         .map_err(error_handler)?;
-    debug!(logger, "Searching for children..."; "parent" => &parent.to_string());
+    debug!(environment.logger, "Searching for children..."; "parent" => &parent.to_string());
 
-    let children = db.children(&id).await.map_err(error_handler)?;
+    let children = environment.db.children(&id).await.map_err(error_handler)?;
     let response = SuccessResponse::Children { parent, children };
 
     Ok(with_status(json(&response), StatusCode::OK))
 }
 
-async fn delete_recording<O>(
-    logger: Arc<Logger>,
-    db: Arc<impl Db>,
-    store: Arc<impl Store<Output = O, Raw = Vec<u8>>>,
+async fn delete_recording<O: Clone + Send + Sync>(
+environment: Environment<O>,
     id: String,
 ) -> Result<StatusCode, reject::Rejection> {
     let error_handler =
@@ -280,17 +262,16 @@ async fn delete_recording<O>(
     let id = Uuid::parse_str(&id)
         .map_err(|_| BackendError::InvalidId(id.clone()))
         .map_err(error_handler)?;
-    debug!(logger, "Deleting recording..."; "id" => format!("{}", &id));
+    debug!(environment.logger, "Deleting recording..."; "id" => format!("{}", &id));
 
-    store.delete(&id).await.map_err(error_handler)?;
-    db.delete(&id).await.map_err(error_handler)?;
+    environment.store.delete(&id).await.map_err(error_handler)?;
+    environment.db.delete(&id).await.map_err(error_handler)?;
 
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn retrieve_recording(
-    logger: Arc<Logger>,
-    db: Arc<impl Db>,
+async fn retrieve_recording<O: Clone + Send + Sync>(
+environment: Environment<O>,
     id: String,
 ) -> Result<WithStatus<Json>, reject::Rejection> {
     use crate::recording::Recording;
@@ -301,9 +282,9 @@ async fn retrieve_recording(
     let id = Uuid::parse_str(&id)
         .map_err(|_| BackendError::InvalidId(id.clone()))
         .map_err(error_handler)?;
-    debug!(logger, "Retrieving recording..."; "id" => format!("{}", &id));
+    debug!(environment.logger, "Retrieving recording..."; "id" => format!("{}", &id));
 
-    let option = db.retrieve(&id).await.map_err(error_handler)?;
+    let option = environment.db.retrieve(&id).await.map_err(error_handler)?;
 
     match option {
         Some(recording) => {
@@ -318,9 +299,8 @@ async fn retrieve_recording(
     }
 }
 
-async fn hide_recording(
-    logger: Arc<Logger>,
-    db: Arc<impl Db>,
+async fn hide_recording<O: Clone + Send + Sync>(
+environment: Environment<O>,
     id: String,
 ) -> Result<StatusCode, reject::Rejection> {
     let error_handler =
@@ -329,24 +309,16 @@ async fn hide_recording(
     let id = Uuid::parse_str(&id)
         .map_err(|_| BackendError::InvalidId(id.clone()))
         .map_err(error_handler)?;
-    debug!(logger, "Hiding recording..."; "id" => format!("{}", &id));
+    debug!(environment.logger, "Hiding recording..."; "id" => format!("{}", &id));
 
-    db.hide(&id).await.map_err(error_handler)?;
+    environment.db.hide(&id).await.map_err(error_handler)?;
 
     Ok(StatusCode::NO_CONTENT)
 }
 
-async fn get_recording_count(
-    _logger: Arc<Logger>,
-    db: Arc<impl Db>) -> Result<Json, reject::Rejection> {
-    let count = db.count_all().await.map_err(|e: BackendError| rejection::Rejection::new(rejection::Context::count(), e))?;
-
-    Ok(json(&SuccessResponse::Count(count)))
-}
-
 async fn verify_audio(
     _logger: Arc<Logger>,
-    checker: Arc<impl Fn(&[u8]) -> Result<(), BackendError>>,
+    checker: Arc<dyn Fn(&[u8]) -> Result<(), BackendError> + Send + Sync>,
     audio: Part,
 ) -> Result<Vec<u8>, BackendError> {
     use crate::io;
@@ -362,7 +334,7 @@ async fn verify_audio(
 
 async fn save_recording_metadata(
     _logger: Arc<Logger>,
-    db: Arc<impl Db>,
+    db: Arc<dyn Db + Send + Sync>,
     metadata: Part,
 ) -> Result<Uuid, BackendError> {
     use crate::io;
@@ -370,8 +342,8 @@ async fn save_recording_metadata(
     let raw_metadata = io::part_as_vec(metadata)
         .await
         .map_err(|_| BackendError::MalformedFormSubmission)?;
-    let metadata: UploadMetadata = serde_json::from_slice(&raw_metadata)
-        .map_err(BackendError::MalformedUploadMetadata)?;
+    let metadata: UploadMetadata =
+        serde_json::from_slice(&raw_metadata).map_err(BackendError::MalformedUploadMetadata)?;
 
     let new_recording = db.insert(metadata).await?;
     let id = new_recording.id();
@@ -381,7 +353,7 @@ async fn save_recording_metadata(
 
 async fn save_upload_audio<O>(
     _logger: Arc<Logger>,
-    store: Arc<impl Store<Output = O, Raw = Vec<u8>>>,
+    store: Arc<dyn Store<Output = O, Raw = Vec<u8>>>,
     key: &Uuid,
     upload: Vec<u8>,
 ) -> Result<(), BackendError> {
@@ -392,8 +364,8 @@ async fn save_upload_audio<O>(
 
 async fn update_recording_url<O>(
     _logger: Arc<Logger>,
-    db: Arc<impl Db>,
-    store: Arc<impl Store<Output = O, Raw = Vec<u8>>>,
+    db: Arc<dyn Db + Send + Sync>,
+    store: Arc<dyn Store<Output = O, Raw = Vec<u8>> + Send + Sync>,
     key: &Uuid,
 ) -> Result<Url, BackendError> {
     let url = store
