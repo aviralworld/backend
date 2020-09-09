@@ -1,4 +1,6 @@
-FROM ekidd/rust-musl-builder:1.46.0 AS builder
+ARG RUST_VERSION
+
+FROM ekidd/rust-musl-builder:$RUST_VERSION AS builder
 
 ARG BACKEND_REVISION
 ENV BACKEND_REVISION=$BACKEND_REVISION

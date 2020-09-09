@@ -1,6 +1,7 @@
 pub mod audio;
 pub mod config;
 pub mod db;
+pub mod environment;
 pub mod errors;
 pub mod io;
 pub mod normalization;

@@ -12,6 +12,7 @@ use warp::http::StatusCode;
 
 use backend::config::{get_ffprobe, get_variable};
 use backend::db::Db;
+use backend::environment::Environment;
 use backend::errors;
 use backend::routes;
 use backend::store::S3Store;
@@ -330,7 +331,9 @@ async fn test_count() {
         .method("GET")
         .reply(&count_filter)
         .await;
-    let count = String::from_utf8_lossy(response.body()).parse::<i64>().expect("parse count response as i64");
+    let count = String::from_utf8_lossy(response.body())
+        .parse::<i64>()
+        .expect("parse count response as i64");
 
     assert_eq!(count, 4);
 }
@@ -414,57 +417,49 @@ async fn test_non_existent_recording() {
 async fn make_upload_filter<'a>(
     test_name: impl Into<String>,
 ) -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::reject::Rejection> + 'a {
-    let (logger_arc, db, checker, urls) = make_environment(test_name.into()).await;
+    let environment = make_environment(test_name.into()).await;
 
-    routes::make_upload_route(
-        logger_arc.clone(),
-        db,
-        Arc::new(make_store()),
-        checker,
-        urls,
-    )
+    routes::make_upload_route(environment)
 }
 
 async fn make_delete_filter<'a>(
     test_name: impl Into<String>,
 ) -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::reject::Rejection> + 'a {
-    let (logger_arc, db, _, urls) = make_environment(test_name.into()).await;
+    let environment = make_environment(test_name.into()).await;
 
-    routes::make_delete_route(logger_arc.clone(), db, Arc::new(make_store()), urls)
+    routes::make_delete_route(environment)
 }
 
 async fn make_children_filter<'a>(
     test_name: impl Into<String>,
 ) -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::reject::Rejection> + 'a {
-    let (logger_arc, db, _, urls) = make_environment(test_name.into()).await;
+    let environment = make_environment(test_name.into()).await;
 
-    routes::make_children_route(logger_arc.clone(), db, urls)
+    routes::make_children_route(environment)
 }
 
 async fn make_retrieve_filter<'a>(
     test_name: impl Into<String>,
 ) -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::reject::Rejection> + 'a {
-    let (logger_arc, db, _, urls) = make_environment(test_name.into()).await;
+    let environment = make_environment(test_name.into()).await;
 
-    routes::make_retrieve_route(logger_arc.clone(), db, urls)
+    routes::make_retrieve_route(environment)
 }
 
-async fn make_count_filter<'a>(test_name: impl Into<String>) -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::reject::Rejection> + 'a {
-    let (logger_arc, db, _, urls) = make_environment(test_name.into()).await;
+async fn make_count_filter<'a>(
+    test_name: impl Into<String>,
+) -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::reject::Rejection> + 'a {
+    let environment = make_environment(test_name.into()).await;
 
-    routes::make_count_route(logger_arc.clone(), db, urls)
+    routes::make_count_route(environment)
 }
 
 async fn make_hide_filter<'a>(
     test_name: impl Into<String>,
 ) -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::reject::Rejection> + 'a {
-    let (logger_arc, db, _, urls) = make_environment(test_name.into()).await;
+    let environment = make_environment(test_name.into()).await;
 
-    routes::make_hide_route(logger_arc.clone(), db, urls)
-}
-
-fn make_store() -> S3Store {
-    S3Store::from_env().expect("initialize S3 store")
+    routes::make_hide_route(environment)
 }
 
 fn parse_children_ids(body: &[u8]) -> Vec<String> {
@@ -491,14 +486,7 @@ fn parse_children_ids(body: &[u8]) -> Vec<String> {
         .collect::<Vec<_>>()
 }
 
-async fn make_environment(
-    test_name: String,
-) -> (
-    Arc<Logger>,
-    Arc<impl Db>,
-    Arc<impl Fn(&[u8]) -> Result<(), errors::BackendError>>,
-    Arc<Urls>,
-) {
+async fn make_environment(test_name: String) -> Environment<()> {
     read_config();
     initialize_global_logger();
 
@@ -508,12 +496,17 @@ async fn make_environment(
     let checker = make_wrapper_for_test(logger_arc.clone());
     let db = make_db().await;
 
-    (
-        logger_arc.clone(),
+    Environment::new(
+        logger_arc,
         Arc::new(db),
-        Arc::new(checker),
         Arc::new(Urls::new("https://www.example.com/", "recs")),
+        Arc::new(make_store()),
+        Arc::new(checker),
     )
+}
+
+fn make_store() -> S3Store {
+    S3Store::from_env().expect("initialize S3 store")
 }
 
 fn initialize_global_logger() {

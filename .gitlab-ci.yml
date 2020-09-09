@@ -1,16 +1,28 @@
 variables:
   CARGO_INCREMENTAL: 0
+  RUST_VERSION: 1.46.0
 
 stages:
   - check
   - docker
+
+style:
+  stage: check
+  image: rust:${RUST_VERSION}-alpine
+  before_script:
+    - rustup component add rustfmt
+  script:
+    - cargo fmt -- --check
+  only:
+    - merge_requests
+  interruptible: yes
 
 test:
   stage: check
   services:
     - postgres:12.3-alpine@sha256:4c5db602c06b811737746e4564040e554ba68cd2ded46a736cbe1af3a638ed0a
     - adobe/s3mock:2.1.24@sha256:f444c12e38050dcf339e8784cacfa40d14a4876503d2818982acb7f117ef03df
-  image: rust:1.45.2-slim
+  image: rust:${RUST_VERSION}-slim
   cache:
     paths:
       - .cargo
@@ -65,6 +77,7 @@ test:
     # TODO also test with `ffmpeg-next`
     - apt-get -o=Dpkg::Use-Pty=0 -qqy update && apt-get -o=Dpkg::Use-Pty=0 -qqy install libssl-dev pkg-config ffmpeg libsqlite3-dev postgresql-client
     - PGPASSWORD=$POSTGRES_PASSWORD createdb -h $POSTGRES_HOST -p $POSTGRES_PORT -U $POSTGRES_USER $POSTGRES_DB_NAME
+    - rustup default stable
     - rustup component add clippy
   script:
     - cargo fetch
@@ -92,6 +105,6 @@ docker:
   script:
     - echo $KANIKO_AUTH_CONFIG > /kaniko/.docker/config.json
     - export build_timestamp=`date +%Y%m%d%H%M%S`
-    - /kaniko/executor --context $CI_PROJECT_DIR --dockerfile $CI_PROJECT_DIR/Dockerfile --cache=true --destination=$CI_REGISTRY_IMAGE:$build_timestamp --destination=$CI_REGISTRY_IMAGE:latest --build-arg BACKEND_REVISION=$CI_COMMIT_SHA
+    - /kaniko/executor --context $CI_PROJECT_DIR --dockerfile $CI_PROJECT_DIR/Dockerfile --cache=true --destination=$CI_REGISTRY_IMAGE:$build_timestamp --destination=$CI_REGISTRY_IMAGE:latest --build-arg RUST_VERSION=$RUST_VERSION --build-arg BACKEND_REVISION=$CI_COMMIT_SHA
   only:
     - master
