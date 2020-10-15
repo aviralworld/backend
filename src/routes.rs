@@ -11,12 +11,11 @@ use warp::reject;
 use warp::reply::{json, with_header, with_status, Json, Reply, WithHeader, WithStatus};
 use warp::Filter;
 
-use crate::db::Db;
+use crate::{db::Db, audio::format::AudioFormat, environment, mime_type::MimeType};
 use crate::environment::Environment;
 use crate::errors::BackendError;
 use crate::io::parse_upload;
 use crate::recording::{ChildRecording, UploadMetadata};
-use crate::store::Store;
 
 mod rejection;
 
@@ -193,7 +192,7 @@ async fn process_upload<O: Clone + Send + Sync>(
     debug!(logger, "Parsing submission...");
     let upload = parse_upload(content).await.map_err(error_handler)?;
     debug!(logger, "Verifying audio contents...");
-    let verified_audio = verify_audio(logger.clone(), checker, upload.audio)
+    let (verified_audio, audio_format) = verify_audio(logger.clone(), checker, upload.audio)
         .await
         .map_err(&error_handler)?;
 
@@ -212,25 +211,32 @@ async fn process_upload<O: Clone + Send + Sync>(
 
     // should this punt to a queue? is that necessary?
     debug!(logger, "Saving recording to store...");
-    save_upload_audio(logger.clone(), store.clone(), &id, verified_audio)
-        .await
-        .map_err(&error_handler)?;
+    let mime_type = db.retrieve_mime_type(&audio_format).await.map_err(&error_handler)?;
 
-    debug!(logger, "Updating recording URL...");
-    update_recording_url(logger.clone(), db.clone(), store.clone(), &id)
-        .await
-        .map_err(&error_handler)?;
+    match mime_type {
+        Some(mime_type) => {
+            save_upload_audio(logger.clone(), store.clone(), &id, mime_type.essence.clone(), verified_audio)
+            .await
+            .map_err(&error_handler)?;
 
-    debug!(logger, "Sending response...");
-    let response = SuccessResponse::Upload {
-        id: id_as_str.clone(),
-    };
+        debug!(logger, "Updating recording URL...");
+        update_recording_url(logger.clone(), db.clone(), store.clone(), &id, mime_type)
+            .await
+            .map_err(&error_handler)?;
 
-    Ok(with_header(
-        with_status(json(&response), StatusCode::CREATED),
-        "location",
-        urls.recording(&id).as_str(),
-    ))
+        debug!(logger, "Sending response...");
+        let response = SuccessResponse::Upload {
+            id: id_as_str.clone(),
+        };
+
+        Ok(with_header(
+            with_status(json(&response), StatusCode::CREATED),
+            "location",
+            urls.recording(&id).as_str(),
+        ))}
+        // why does this work but not directly returning `Err(error_handler(BackendError::...))`?
+        None => Err(BackendError::InvalidAudioFormat { format: audio_format }).map_err(&error_handler)?,
+    }
 }
 
 async fn get_children<O: Clone + Send + Sync>(
@@ -318,18 +324,18 @@ async fn hide_recording<O: Clone + Send + Sync>(
 
 async fn verify_audio(
     _logger: Arc<Logger>,
-    checker: Arc<dyn Fn(&[u8]) -> Result<(), BackendError> + Send + Sync>,
+    checker: Arc<environment::Checker>,
     audio: Part,
-) -> Result<Vec<u8>, BackendError> {
+) -> Result<(Vec<u8>, AudioFormat), BackendError> {
     use crate::io;
 
     let audio_data = io::part_as_vec(audio)
         .await
         .map_err(|_| BackendError::MalformedFormSubmission)?;
 
-    checker(&audio_data)?;
+    let format = checker(&audio_data)?;
 
-    Ok(audio_data)
+    Ok((audio_data, format))
 }
 
 async fn save_recording_metadata(
@@ -353,11 +359,12 @@ async fn save_recording_metadata(
 
 async fn save_upload_audio<O>(
     _logger: Arc<Logger>,
-    store: Arc<dyn Store<Output = O, Raw = Vec<u8>>>,
+    store: Arc<environment::VecStore<O>>,
     key: &Uuid,
+    content_type: String,
     upload: Vec<u8>,
 ) -> Result<(), BackendError> {
-    store.save(key, upload).await?;
+    store.save(key, content_type, upload).await?;
 
     Ok(())
 }
@@ -365,14 +372,15 @@ async fn save_upload_audio<O>(
 async fn update_recording_url<O>(
     _logger: Arc<Logger>,
     db: Arc<dyn Db + Send + Sync>,
-    store: Arc<dyn Store<Output = O, Raw = Vec<u8>> + Send + Sync>,
+    store: Arc<environment::VecStore<O>>,
     key: &Uuid,
+    mime_type: MimeType,
 ) -> Result<Url, BackendError> {
     let url = store
         .get_url(&key)
         .map_err(|e| BackendError::FailedToGenerateUrl { source: e })?;
 
-    db.update_url(key, &url).await?;
+    db.update_url(key, &url, mime_type.clone()).await?;
 
     Ok(url)
 }
@@ -397,7 +405,7 @@ fn status_code_for(e: &BackendError) -> StatusCode {
 
     match e {
         BadRequest | TooManyStreams(..) => StatusCode::BAD_REQUEST,
-        WrongMediaType { .. } => StatusCode::UNSUPPORTED_MEDIA_TYPE,
+        BackendError::InvalidAudioFormat { .. } => StatusCode::UNSUPPORTED_MEDIA_TYPE,
         PartsMissing => StatusCode::BAD_REQUEST,
         NameAlreadyExists => StatusCode::FORBIDDEN,
         _ => StatusCode::INTERNAL_SERVER_ERROR,

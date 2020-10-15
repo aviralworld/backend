@@ -122,6 +122,7 @@ dependencies = [
  "ffmpeg-next",
  "futures",
  "lazy_static",
+ "mime 0.3.16",
  "movine",
  "once_cell",
  "postgres",

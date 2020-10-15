@@ -8,8 +8,7 @@ use slog::{info, Drain};
 use warp::Filter;
 
 use backend::audio;
-use backend::config::get_ffprobe;
-use backend::config::get_variable;
+use backend::config::{get_ffprobe, get_variable};
 use backend::db::PgDb;
 use backend::environment::Environment;
 use backend::routes;
@@ -33,13 +32,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let logger = Arc::new(logger);
 
     let ffprobe_path = get_ffprobe(env::var("BACKEND_FFPROBE_PATH").ok());
-    let expected_codec = get_variable("BACKEND_MEDIA_CODEC");
-    let expected_format = get_variable("BACKEND_MEDIA_FORMAT");
     let checker = Arc::new(audio::make_wrapper(
         logger.clone(),
         ffprobe_path,
-        expected_codec,
-        expected_format,
     ));
 
     let connection_string = get_variable("BACKEND_DB_CONNECTION_STRING");

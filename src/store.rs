@@ -21,7 +21,7 @@ pub trait Store: Send + Sync {
     fn get_url(&self, key: &Uuid) -> Result<Url, ParseError>;
 
     /// Saves the given data under the given key.
-    fn save(&self, key: &Uuid, raw: Self::Raw) -> BoxFuture<Result<Self::Output, BackendError>>;
+    fn save(&self, key: &Uuid, content_type: String, raw: Self::Raw) -> BoxFuture<Result<Self::Output, BackendError>>;
 }
 
 /// A store that saves its data to S3.
@@ -30,9 +30,7 @@ pub struct S3Store {
     acl: String,
     bucket: String,
     cache_control: String,
-    content_type: String,
     base_url: Url,
-    extension: String,
 }
 
 impl S3Store {
@@ -42,18 +40,14 @@ impl S3Store {
         acl: String,
         bucket: String,
         cache_control: String,
-        content_type: String,
         base_url: Url,
-        extension: String,
     ) -> Self {
         Self {
             client,
             acl,
             bucket,
             cache_control,
-            content_type,
             base_url,
-            extension,
         }
     }
 
@@ -73,7 +67,6 @@ impl S3Store {
         };
 
         let bucket = get_variable("S3_BUCKET_NAME");
-        let content_type = get_variable("BACKEND_S3_CONTENT_TYPE");
         let acl = get_variable("BACKEND_S3_ACL");
         let cache_control = get_variable("BACKEND_S3_CACHE_CONTROL");
 
@@ -84,16 +77,13 @@ impl S3Store {
         ));
 
         let base_url = Url::parse(&get_variable("S3_BASE_URL")).expect("parse S3_BASE_URL");
-        let extension = get_variable("BACKEND_MEDIA_EXTENSION");
 
         Ok(S3Store::new(
             client,
             acl,
             bucket,
             cache_control,
-            content_type,
             base_url,
-            extension,
         ))
     }
 }
@@ -107,18 +97,18 @@ impl Store for S3Store {
     }
 
     fn get_url<'a>(&self, key: &'a Uuid) -> Result<Url, ParseError> {
-        self.base_url.join(&format!("{}.{}", key, self.extension))
+        self.base_url.join(&key.to_string())
     }
 
-    fn save<'a>(&self, key: &Uuid, raw: Vec<u8>) -> BoxFuture<Result<(), BackendError>> {
-        upload(self, *key, raw).boxed()
+    fn save<'a>(&self, key: &Uuid, content_type: String, raw: Vec<u8>) -> BoxFuture<Result<(), BackendError>> {
+        upload(self, *key, content_type, raw).boxed()
     }
 }
 
 async fn delete(store: &S3Store, key: Uuid) -> Result<(), BackendError> {
     let request = DeleteObjectRequest {
         bucket: store.bucket.clone(),
-        key: filename(store, &key),
+        key: key.to_string(),
         ..Default::default()
     };
 
@@ -129,7 +119,7 @@ async fn delete(store: &S3Store, key: Uuid) -> Result<(), BackendError> {
         .map_err(|source| BackendError::DeleteFailed { source })
 }
 
-async fn upload(store: &S3Store, key: Uuid, raw: Vec<u8>) -> Result<(), BackendError> {
+async fn upload(store: &S3Store, key: Uuid, content_type: String, raw: Vec<u8>) -> Result<(), BackendError> {
     use std::convert::TryFrom;
 
     let len = i64::try_from(raw.len()).expect("raw data length must be within range of i64");
@@ -140,8 +130,8 @@ async fn upload(store: &S3Store, key: Uuid, raw: Vec<u8>) -> Result<(), BackendE
         bucket: store.bucket.clone(),
         cache_control: Some(store.cache_control.clone()),
         content_length: Some(len),
-        content_type: Some(store.content_type.clone()),
-        key: filename(store, &key),
+        content_type: Some(content_type),
+        key: key.to_string(),
         ..Default::default()
     };
 
@@ -151,8 +141,4 @@ async fn upload(store: &S3Store, key: Uuid, raw: Vec<u8>) -> Result<(), BackendE
         Ok(_) => Ok(()),
         Err(e) => Err(BackendError::UploadFailed { source: e }),
     }
-}
-
-fn filename(store: &S3Store, key: &Uuid) -> String {
-    format!("{}.{}", key, store.extension)
 }

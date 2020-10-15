@@ -1,4 +1,4 @@
-  SET statement_timeout = 0;
+SET statement_timeout = 0;
 SET lock_timeout = 0;
 SET idle_in_transaction_session_timeout = 0;
 SET client_encoding = 'UTF8';
@@ -15,6 +15,7 @@ TRUNCATE recordings CASCADE;
 TRUNCATE ages CASCADE;
 TRUNCATE categories CASCADE;
 TRUNCATE genders CASCADE;
+TRUNCATE mime_types CASCADE;
 
 INSERT INTO ages (id, label) VALUES (1, 'Age 1');
 INSERT INTO ages (id, label) VALUES (2, 'Age B');
@@ -34,6 +35,9 @@ INSERT INTO genders (id, label) VALUES (1, 'One of the genders');
 INSERT INTO genders (id, label) VALUES (2, 'Some other genders');
 INSERT INTO genders (id, label) VALUES (3, 'No gender specified');
 INSERT INTO genders (id, label) VALUES (4, 'None of the above');
+
+INSERT INTO mime_types (essence, container, codec, extension) VALUES ('audio/ogg; codec=opus', 'ogg', 'opus', 'ogg');
+INSERT INTO mime_types (essence, container, codec, extension) VALUES ('audio/ogg', 'ogg', 'vorbis', 'ogg');
 
 --
 -- TOC entry 2980 (class 0 OID 0)
