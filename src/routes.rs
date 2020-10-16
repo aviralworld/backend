@@ -40,6 +40,22 @@ const MAX_CONTENT_LENGTH: u64 = 2 * 1024 * 1024 * 1024;
 // in the mean time, we have to use `BoxFuture` and forward to real
 // `async fn`s if we want to use `async`/`await`
 
+pub fn make_formats_route<'a, O: Clone + Send + Sync + 'a>(
+    environment: Environment<O>,
+) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
+    let recordings_path = environment.urls.recordings_path.clone();
+    let logger = environment.logger.clone();
+
+    warp::path(recordings_path)
+        .and(warp::path("formats"))
+        .and(warp::path::end())
+        .and(warp::get())
+        .and_then(move || -> BoxFuture<Result<Json, reject::Rejection>> {
+            get_formats(environment.clone()).boxed()
+        })
+        .recover(move |r| format_rejection(logger.clone(), r))
+}
+
 pub fn make_count_route<'a, O: Clone + Send + Sync + 'a>(
     environment: Environment<O>,
 ) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
@@ -158,6 +174,18 @@ pub fn make_hide_route<'a, O: Clone + Send + Sync + 'a>(
             },
         )
         .recover(move |r| format_rejection(logger.clone(), r))
+}
+
+async fn get_formats<O: Clone + Send + Sync>(
+    environment: Environment<O>,
+) -> Result<Json, reject::Rejection> {
+    let formats = environment
+        .db
+        .retrieve_format_essences()
+        .await
+        .map_err(|e: BackendError| rejection::Rejection::new(rejection::Context::formats(), e))?;
+
+    Ok(json(&formats))
 }
 
 async fn get_recording_count<O: Clone + Send + Sync>(

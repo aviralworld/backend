@@ -18,6 +18,8 @@ pub trait Db {
 
     fn retrieve(&self, id: &Uuid) -> BoxFuture<Result<Option<Recording>, BackendError>>;
 
+    fn retrieve_format_essences(&self) -> BoxFuture<Result<Vec<String>, BackendError>>;
+
     fn retrieve_mime_type(
         &self,
         format: &AudioFormat,
@@ -90,6 +92,10 @@ mod postgres {
 
         fn retrieve(&self, id: &Uuid) -> BoxFuture<Result<Option<Recording>, BackendError>> {
             retrieve(*id, &self.pool).boxed()
+        }
+
+        fn retrieve_format_essences(&self) -> BoxFuture<Result<Vec<String>, BackendError>> {
+            retrieve_format_essences(&self.pool).boxed()
         }
 
         fn retrieve_mime_type(
@@ -210,6 +216,18 @@ mod postgres {
             .map_err(map_sqlx_error)?;
 
         Ok(recording)
+    }
+
+    async fn retrieve_format_essences(pool: &PgPool) -> Result<Vec<String>, BackendError> {
+        let query = sqlx::query(include_str!("queries/retrieve_format_essences.sql"));
+
+        let essences: Vec<String> = query
+            .try_map(|row: PgRow| Ok(try_get(&row, "essence")?))
+            .fetch_all(pool)
+            .await
+            .map_err(map_sqlx_error)?;
+
+        Ok(essences)
     }
 
     async fn retrieve_mime_type(

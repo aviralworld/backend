@@ -92,6 +92,8 @@ const BOUNDARY: &str = "thisisaboundary1234";
 
 #[tokio::test]
 async fn api_works() {
+    test_formats().await;
+
     test_non_existent_recording().await;
 
     let content_type = multipart_content_type(&BOUNDARY);
@@ -117,6 +119,21 @@ async fn api_works() {
     test_count().await;
 
     test_updating(ids.iter().last().expect("get last child ID")).await;
+}
+
+async fn test_formats() {
+    let response = warp::test::request()
+        .path("/recs/formats")
+        .method("GET")
+        .reply(&make_formats_filter("test_formats").await)
+        .await;
+
+    let body = String::from_utf8_lossy(response.body()).into_owned();
+
+    let formats =
+        serde_json::from_str::<Vec<String>>(&body).expect("parse response as Vec<String>");
+
+    assert_eq!(formats, vec!["audio/ogg; codec=opus", "audio/ogg"]);
 }
 
 async fn test_upload(file_path: impl AsRef<Path>, content_type: impl AsRef<str>) -> String {
@@ -427,6 +444,14 @@ async fn test_non_existent_recording() {
         .await;
 
     assert_eq!(request.status(), StatusCode::NOT_FOUND)
+}
+
+async fn make_formats_filter<'a>(
+    test_name: impl Into<String>,
+) -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::reject::Rejection> + 'a {
+    let environment = make_environment(test_name.into()).await;
+
+    routes::make_formats_route(environment)
 }
 
 async fn make_upload_filter<'a>(

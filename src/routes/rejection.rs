@@ -43,6 +43,7 @@ pub enum Context {
     Children { parent: String },
     Count,
     Delete { id: String },
+    Formats,
     Hide { id: String },
     Retrieve { id: String },
     Upload { id: Option<String> },
@@ -59,6 +60,10 @@ impl Context {
 
     pub fn delete(id: String) -> Context {
         Context::Delete { id }
+    }
+
+    pub fn formats() -> Context {
+        Context::Formats
     }
 
     pub fn hide(id: String) -> Context {
