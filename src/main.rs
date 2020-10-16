@@ -3,7 +3,6 @@ use std::error::Error;
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use cfg_if::cfg_if;
 use slog::{info, Drain};
 use warp::Filter;
 
@@ -18,12 +17,6 @@ use backend::urls::Urls;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     dotenv::dotenv().ok();
-
-    cfg_if! {
-        if #[cfg(enable_warp_logging)] {
-            pretty_env_logger::init();
-        }
-    }
 
     let store = Arc::new(S3Store::from_env().expect("initialize S3 store from environment"));
 
@@ -61,7 +54,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .or(retrieve_route)
         .or(hide_route);
 
-    let port: u16 = get_variable("BACKEND_PORT").parse().expect("parse BACKEND_PORT as u16");
+    let port: u16 = get_variable("BACKEND_PORT")
+        .parse()
+        .expect("parse BACKEND_PORT as u16");
     warp::serve(routes).run(([127, 0, 0, 1], port)).await;
 
     Ok(())
@@ -72,22 +67,17 @@ fn initialize_logger() -> slog::Logger {
     use slog_async::Async;
     use slog_json::Json;
 
-    #[cfg(enable_warp_logging)]
-    static mut SLOG_SCOPE_GUARD: Option<slog_envlogger::EnvLogger> = None;
-
     // TODO is this the correct sequence?
     let drain = Mutex::new(Json::default(std::io::stderr())).map(Fuse);
     let drain = Async::new(drain).build().fuse();
 
-    cfg_if! {
-        if #[cfg(enable_warp_logging)] {
-            debug!(logger, "Setting up Warp logging...");
-            SLOG_SCOPE_GUARD = slog_envlogger::new(drain);
-        }
-    }
+    #[cfg(feature = "enable_warp_logging")]
+    pretty_env_logger::init();
 
-    Logger::root(
+    let logger = Logger::root(
         drain,
         o!("version" => env!("CARGO_PKG_VERSION"), "revision" => option_env!("BACKEND_REVISION")),
-    )
+    );
+
+    logger
 }
