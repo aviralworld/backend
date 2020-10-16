@@ -61,7 +61,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .or(retrieve_route)
         .or(hide_route);
 
-    warp::serve(routes).run(([127, 0, 0, 1], 3030)).await;
+    let port: u16 = get_variable("BACKEND_PORT").parse().expect("parse BACKEND_PORT as u16");
+    warp::serve(routes).run(([127, 0, 0, 1], port)).await;
 
     Ok(())
 }
