@@ -10,13 +10,16 @@ use slog::{self, o, Logger};
 use url::Url;
 use warp::http::StatusCode;
 
-use backend::config::{get_ffprobe, get_variable};
 use backend::db::Db;
 use backend::environment::Environment;
 use backend::errors;
 use backend::routes;
 use backend::store::S3Store;
 use backend::urls::Urls;
+use backend::{
+    audio::format::AudioFormat,
+    config::{get_ffprobe, get_variable},
+};
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -30,6 +33,7 @@ struct CreationResponse {
 struct RetrievalResponse {
     id: String,
     url: String,
+    mime_type: RelatedLabel,
     created_at: i64,
     updated_at: i64,
     category: RelatedLabel,
@@ -47,6 +51,7 @@ impl RetrievalResponse {
         ComparableRetrievalResponse {
             id: self.id,
             url: self.url,
+            mime_type: self.mime_type,
             created_at: self.created_at,
             category: self.category,
             unlisted: self.unlisted,
@@ -65,6 +70,7 @@ impl RetrievalResponse {
 struct ComparableRetrievalResponse {
     id: String,
     url: String,
+    mime_type: RelatedLabel,
     created_at: i64,
     category: RelatedLabel,
     unlisted: bool,
@@ -86,6 +92,8 @@ const BOUNDARY: &str = "thisisaboundary1234";
 
 #[tokio::test]
 async fn api_works() {
+    test_formats().await;
+
     test_non_existent_recording().await;
 
     let content_type = multipart_content_type(&BOUNDARY);
@@ -105,12 +113,27 @@ async fn api_works() {
 
     let ids = test_uploading_children(&file_path, &content_type, &id, children).await;
 
-    let id_to_delete = ids.iter().skip(1).next().expect("get second child ID");
+    let id_to_delete = ids.get(1).expect("get second child ID");
     test_deletion(id_to_delete, &id, &ids).await;
 
     test_count().await;
 
     test_updating(ids.iter().last().expect("get last child ID")).await;
+}
+
+async fn test_formats() {
+    let response = warp::test::request()
+        .path("/recs/formats")
+        .method("GET")
+        .reply(&make_formats_filter("test_formats").await)
+        .await;
+
+    let body = String::from_utf8_lossy(response.body()).into_owned();
+
+    let formats =
+        serde_json::from_str::<Vec<String>>(&body).expect("parse response as Vec<String>");
+
+    assert_eq!(formats, vec!["audio/ogg; codec=opus", "audio/ogg"]);
 }
 
 async fn test_upload(file_path: impl AsRef<Path>, content_type: impl AsRef<str>) -> String {
@@ -209,8 +232,8 @@ async fn test_uploading_children(
         )
         .await;
 
-        for child_id in child_id {
-            ids.push(child_id);
+        if let Some(id) = child_id {
+            ids.push(id);
         }
     }
 
@@ -286,6 +309,15 @@ async fn test_deletion(id_to_delete: &str, parent: &str, ids: &[String]) {
             .await
             .expect("verify recording exists in store before deleting");
         assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get("content-type")
+                .expect("get content-type header")
+                .to_str()
+                .expect("convert content-type header to string"),
+            "audio/ogg; codec=opus"
+        );
     }
 
     let delete_filter = make_delete_filter("api_works").await;
@@ -327,7 +359,7 @@ async fn test_deletion(id_to_delete: &str, parent: &str, ids: &[String]) {
 async fn test_count() {
     let count_filter = make_count_filter("test_updating").await;
     let response = warp::test::request()
-        .path(&format!("/recs/count"))
+        .path("/recs/count")
         .method("GET")
         .reply(&count_filter)
         .await;
@@ -412,6 +444,14 @@ async fn test_non_existent_recording() {
         .await;
 
     assert_eq!(request.status(), StatusCode::NOT_FOUND)
+}
+
+async fn make_formats_filter<'a>(
+    test_name: impl Into<String>,
+) -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::reject::Rejection> + 'a {
+    let environment = make_environment(test_name.into()).await;
+
+    routes::make_formats_route(environment)
 }
 
 async fn make_upload_filter<'a>(
@@ -527,7 +567,8 @@ fn upload_file(
     boundary: &[u8],
     metadata: &[u8],
 ) -> warp::test::RequestBuilder {
-    let data = fs::read(path.as_ref()).expect(&format!("read file {:?}", path.as_ref().display()));
+    let data = fs::read(path.as_ref())
+        .unwrap_or_else(|_| panic!("read file {:?}", path.as_ref().display()));
     let body = make_multipart_body(boundary, metadata, &data);
 
     warp::test::request()
@@ -540,22 +581,21 @@ fn upload_file(
 
 fn make_wrapper_for_test(
     logger: Arc<Logger>,
-) -> impl Fn(&[u8]) -> Result<(), errors::BackendError> {
+) -> impl Fn(&[u8]) -> Result<AudioFormat, errors::BackendError> {
     use backend::audio;
 
     audio::make_wrapper(
         logger.clone(),
         get_ffprobe(env::var("BACKEND_FFPROBE_PATH").ok()),
-        env::var("BACKEND_MEDIA_CODEC")
-            .expect("must define BACKEND_MEDIA_CODEC environment variable"),
-        env::var("BACKEND_MEDIA_FORMAT")
-            .expect("must define BACKEND_MEDIA_FORMAT environment variable"),
     )
 }
 
 fn verify_recording_data(recording: &RetrievalResponse, id: &str, parent_id: &str) {
     assert_eq!(recording.id, id);
     // the URL is tested for validity separately
+
+    assert_eq!(recording.mime_type.1, "audio/ogg; codec=opus");
+
     // serde has already verified that the times are i64s, i.e. valid as Unix timestamps
     assert_eq!(
         recording.category,
@@ -590,7 +630,7 @@ async fn make_db() -> impl Db {
         INITIALIZED_DB.call_once(|| {
             let connection_string = connection_string.clone();
 
-            if env::var("BACKEND_TEST_INITIALIZE_DB").unwrap_or("0".to_owned()) == "1" {
+            if env::var("BACKEND_TEST_INITIALIZE_DB").unwrap_or_else(|_| "0".to_owned()) == "1" {
                 initialize_db_for_test(&connection_string);
             }
         });
@@ -623,12 +663,10 @@ fn initialize_db_for_test(connection_string: &str) {
 }
 
 fn make_multipart_body(boundary: &[u8], metadata: &[u8], content: &[u8]) -> Vec<u8> {
-    const NEWLINE: &[u8] = "\r\n".as_bytes();
-    const METADATA_HEADER: &[u8] =
-        "Content-Disposition: form-data; name=\"metadata\"\r\n\r\n".as_bytes();
+    const NEWLINE: &[u8] = b"\r\n";
+    const METADATA_HEADER: &[u8] = b"Content-Disposition: form-data; name=\"metadata\"\r\n\r\n";
     const AUDIO_HEADER: &[u8] =
-        "Content-Disposition: form-data; name=\"audio\"\r\nContent-Type: audio/ogg\r\n\r\n"
-            .as_bytes();
+        b"Content-Disposition: form-data; name=\"audio\"\r\nContent-Type: audio/ogg\r\n\r\n";
 
     let boundary = boundary_with_leader(boundary);
     let boundary = boundary.as_slice();
@@ -647,7 +685,7 @@ fn make_multipart_body(boundary: &[u8], metadata: &[u8], content: &[u8]) -> Vec<
     parts.push(&content);
     parts.push(NEWLINE);
     parts.push(boundary);
-    parts.push("--".as_bytes());
+    parts.push(b"--");
     parts.push(NEWLINE);
 
     parts.concat()

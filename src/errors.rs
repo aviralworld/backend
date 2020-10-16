@@ -5,6 +5,8 @@ use rusoto_s3::{DeleteObjectError, PutObjectError};
 use thiserror::Error;
 use uuid::Uuid;
 
+use crate::audio::format;
+
 /// Enumerates high-level errors returned by this library.
 #[derive(Debug, Error)]
 pub enum BackendError {
@@ -39,15 +41,6 @@ pub enum BackendError {
     /// Represents an error caused by the user uploading malformed metadata.
     #[error("failed to parse uploaded metadata: {0}")]
     MalformedUploadMetadata(serde_json::Error),
-
-    /// Represents an error caused by the user uploading a media file of the wrong kind.
-    #[error("wrong media type (should be {expected_codec} inside {expected_format}; was {actual_codec} inside {actual_format})")]
-    WrongMediaType {
-        actual_codec: String,
-        expected_codec: String,
-        actual_format: String,
-        expected_format: String,
-    },
 
     /// Represents an error caused by the user uploading a media file with too many streams.
     #[error("too many streams: should be {0}, was {1}")]
@@ -90,4 +83,9 @@ pub enum BackendError {
         url: String,
         source: url::ParseError,
     },
+
+    /// Represents an error caused by not being able to find a
+    /// container & codec combination in the database.
+    #[error("invalid audio format: {}/{}", format.container, format.codec)]
+    InvalidAudioFormat { format: format::AudioFormat },
 }

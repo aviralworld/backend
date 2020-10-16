@@ -2,8 +2,8 @@ use futures::future::BoxFuture;
 use url::Url;
 use uuid::Uuid;
 
-use crate::errors::BackendError;
 use crate::recording::{ChildRecording, NewRecording, Recording, UploadMetadata};
+use crate::{audio::format::AudioFormat, errors::BackendError, mime_type::MimeType};
 
 pub trait Db {
     fn children(&self, id: &Uuid) -> BoxFuture<Result<Vec<ChildRecording>, BackendError>>;
@@ -18,7 +18,19 @@ pub trait Db {
 
     fn retrieve(&self, id: &Uuid) -> BoxFuture<Result<Option<Recording>, BackendError>>;
 
-    fn update_url(&self, id: &Uuid, url: &Url) -> BoxFuture<Result<(), BackendError>>;
+    fn retrieve_format_essences(&self) -> BoxFuture<Result<Vec<String>, BackendError>>;
+
+    fn retrieve_mime_type(
+        &self,
+        format: &AudioFormat,
+    ) -> BoxFuture<Result<Option<MimeType>, BackendError>>;
+
+    fn update_url(
+        &self,
+        id: &Uuid,
+        url: &Url,
+        mime_type: MimeType,
+    ) -> BoxFuture<Result<(), BackendError>>;
 }
 
 pub use self::postgres::*;
@@ -35,8 +47,8 @@ mod postgres {
     use url::Url;
     use uuid::Uuid;
 
-    use crate::errors::BackendError;
     use crate::recording::{ChildRecording, Id, NewRecording, Recording, Times, UploadMetadata};
+    use crate::{audio::format::AudioFormat, errors::BackendError, mime_type::MimeType};
 
     static DEFAULT_URL: Option<String> = None;
 
@@ -82,8 +94,24 @@ mod postgres {
             retrieve(*id, &self.pool).boxed()
         }
 
-        fn update_url(&self, id: &Uuid, url: &Url) -> BoxFuture<Result<(), BackendError>> {
-            update_url(*id, url.clone(), &self.pool).boxed()
+        fn retrieve_format_essences(&self) -> BoxFuture<Result<Vec<String>, BackendError>> {
+            retrieve_format_essences(&self.pool).boxed()
+        }
+
+        fn retrieve_mime_type(
+            &self,
+            format: &AudioFormat,
+        ) -> BoxFuture<Result<Option<MimeType>, BackendError>> {
+            retrieve_mime_type(format.clone(), &self.pool).boxed()
+        }
+
+        fn update_url(
+            &self,
+            id: &Uuid,
+            url: &Url,
+            mime_type: MimeType,
+        ) -> BoxFuture<Result<(), BackendError>> {
+            update_url(*id, url.clone(), mime_type, &self.pool).boxed()
         }
     }
 
@@ -145,6 +173,7 @@ mod postgres {
 
         let (id, created_at, updated_at) = query
             .bind(&DEFAULT_URL)
+            .bind(None::<Option<i16>>)
             .bind(&metadata.category_id)
             .bind(&metadata.parent_id)
             .bind(&metadata.unlisted)
@@ -189,12 +218,60 @@ mod postgres {
         Ok(recording)
     }
 
-    async fn update_url(id: Uuid, url: Url, pool: &PgPool) -> Result<(), BackendError> {
+    async fn retrieve_format_essences(pool: &PgPool) -> Result<Vec<String>, BackendError> {
+        let query = sqlx::query(include_str!("queries/retrieve_format_essences.sql"));
+
+        let essences: Vec<String> = query
+            .try_map(|row: PgRow| Ok(try_get(&row, "essence")?))
+            .fetch_all(pool)
+            .await
+            .map_err(map_sqlx_error)?;
+
+        Ok(essences)
+    }
+
+    async fn retrieve_mime_type(
+        format: AudioFormat,
+        pool: &PgPool,
+    ) -> Result<Option<MimeType>, BackendError> {
+        let query = sqlx::query(include_str!("queries/retrieve_mime_type.sql"));
+
+        let mime_type: Option<MimeType> = query
+            .bind(format.container)
+            .bind(format.codec)
+            .try_map(|row: PgRow| {
+                let id: i16 = try_get(&row, "id")?;
+                let essence: String = try_get(&row, "essence")?;
+                let container: String = try_get(&row, "container")?;
+                let codec: String = try_get(&row, "codec")?;
+                let extension: String = try_get(&row, "extension")?;
+
+                Ok(MimeType::new(
+                    id,
+                    AudioFormat::new(container, codec),
+                    essence,
+                    extension,
+                ))
+            })
+            .fetch_optional(pool)
+            .await
+            .map_err(map_sqlx_error)?;
+
+        Ok(mime_type)
+    }
+
+    async fn update_url(
+        id: Uuid,
+        url: Url,
+        mime_type: MimeType,
+        pool: &PgPool,
+    ) -> Result<(), BackendError> {
         let query = sqlx::query(include_str!("queries/update_url.sql"));
 
         let _ = query
             .bind(id)
             .bind(url.as_str())
+            .bind(mime_type.id)
             .execute(pool)
             .await
             .map_err(map_sqlx_error)?;
@@ -230,6 +307,7 @@ mod postgres {
             sqlx::Error::Decode(Box::new(BackendError::UnableToParseUrl { url, source }))
         })?;
 
+        let mime_type = Label::new(try_get(&row, "mime_type_id")?, try_get(&row, "mime_type")?);
         let category = Label::new(try_get(&row, "category_id")?, try_get(&row, "category")?);
         let gender = make_optional_label("gender_id", "gender")?;
         let age = make_optional_label("age_id", "age")?;
@@ -238,7 +316,8 @@ mod postgres {
         let occupation: Option<String> = try_get(&row, "occupation")?;
 
         Ok(Recording::Active(ActiveRecording::new(
-            id, times, name, parent_id, url, category, gender, age, location, occupation, unlisted,
+            id, times, name, parent_id, url, mime_type, category, gender, age, location,
+            occupation, unlisted,
         )))
     }
 

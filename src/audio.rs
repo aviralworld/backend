@@ -5,14 +5,12 @@ use slog::Logger;
 
 use crate::errors::BackendError;
 
+pub mod format;
+
+use format::AudioFormat;
+
 pub trait CodecChecker {
-    fn check_codec(
-        &self,
-        logger: Arc<Logger>,
-        data: &[u8],
-        expected_codec: &str,
-        expected_format: &str,
-    ) -> Result<(), BackendError>;
+    fn identify(&self, logger: Arc<Logger>, data: &[u8]) -> Result<AudioFormat, BackendError>;
 
     fn new(ffprobe_path: Option<impl AsRef<Path>>) -> Self;
 }
@@ -20,17 +18,10 @@ pub trait CodecChecker {
 pub fn make_wrapper(
     logger: Arc<Logger>,
     ffprobe_path: Option<PathBuf>,
-    expected_codec: String,
-    expected_format: String,
-) -> impl Fn(&[u8]) -> Result<(), BackendError> {
+) -> impl Fn(&[u8]) -> Result<AudioFormat, BackendError> {
     let checker = inner::Checker::new(ffprobe_path);
-    let expected_codec = expected_codec;
 
-    move |data: &[u8]| {
-        checker
-            .check_codec(logger.clone(), data, &expected_codec, &expected_format)
-            .map(|_| ())
-    }
+    move |data: &[u8]| checker.identify(logger.clone(), data)
 }
 
 #[cfg(not(use_ffmpeg_sys))]
@@ -41,8 +32,9 @@ mod inner {
 
     use lazy_static::lazy_static;
     use serde::Deserialize;
-    use slog::{debug, Logger};
+    use slog::Logger;
 
+    use crate::audio::format::AudioFormat;
     use crate::errors::BackendError;
 
     lazy_static! {
@@ -81,13 +73,7 @@ mod inner {
     impl Checker {}
 
     impl super::CodecChecker for Checker {
-        fn check_codec(
-            &self,
-            logger: Arc<Logger>,
-            data: &[u8],
-            expected_codec: &str,
-            expected_format: &str,
-        ) -> Result<(), BackendError> {
+        fn identify(&self, _logger: Arc<Logger>, data: &[u8]) -> Result<AudioFormat, BackendError> {
             use std::io::Write;
             use std::process::Command;
 
@@ -120,18 +106,7 @@ mod inner {
             let codec = &stream.codec_name;
             let format = &parsed.format.format_name;
 
-            debug!(logger, "verifying codec and format"; "actual_codec" => codec, "actual_format" => format, "expected_codec" => expected_codec, "expected_format" => expected_format);
-
-            if codec == expected_codec && format == expected_format {
-                return Ok(());
-            }
-
-            Err(BackendError::WrongMediaType {
-                actual_codec: codec.to_owned(),
-                expected_codec: expected_codec.to_owned(),
-                actual_format: format.to_owned(),
-                expected_format: expected_format.to_owned(),
-            })
+            Ok(AudioFormat::new(format.to_owned(), codec.to_owned()))
         }
 
         fn new(path: Option<impl AsRef<Path>>) -> Self {

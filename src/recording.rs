@@ -21,6 +21,9 @@ pub struct ActiveRecording {
     /// The URL of the file.
     url: Url,
 
+    /// The MIME type of the file.
+    mime_type: Label,
+
     /// The times it was created and updated.
     #[serde(flatten)]
     times: Times,
@@ -59,6 +62,7 @@ impl ActiveRecording {
         name: String,
         parent: Option<Uuid>,
         url: Url,
+        mime_type: Label,
         category: Label,
         gender: Option<Label>,
         age: Option<Label>,
@@ -72,6 +76,7 @@ impl ActiveRecording {
             times,
             parent,
             url,
+            mime_type,
             category,
             gender,
             age,

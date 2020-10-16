@@ -4,6 +4,7 @@ pub mod db;
 pub mod environment;
 pub mod errors;
 pub mod io;
+pub mod mime_type;
 pub mod normalization;
 pub mod recording;
 pub mod routes;
