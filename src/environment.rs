@@ -2,10 +2,10 @@ use std::sync::Arc;
 
 use slog::Logger;
 
-use crate::{db::Db, audio::format::AudioFormat};
 use crate::errors::BackendError;
 use crate::store::Store;
 use crate::urls::Urls;
+use crate::{audio::format::AudioFormat, db::Db};
 
 pub type Checker = dyn Fn(&[u8]) -> Result<AudioFormat, BackendError> + Send + Sync;
 pub type VecStore<O> = dyn Store<Output = O, Raw = Vec<u8>> + Send + Sync;

@@ -10,11 +10,7 @@ pub mod format;
 use format::AudioFormat;
 
 pub trait CodecChecker {
-    fn identify(
-        &self,
-        logger: Arc<Logger>,
-        data: &[u8],
-    ) -> Result<AudioFormat, BackendError>;
+    fn identify(&self, logger: Arc<Logger>, data: &[u8]) -> Result<AudioFormat, BackendError>;
 
     fn new(ffprobe_path: Option<impl AsRef<Path>>) -> Self;
 }
@@ -25,10 +21,7 @@ pub fn make_wrapper(
 ) -> impl Fn(&[u8]) -> Result<AudioFormat, BackendError> {
     let checker = inner::Checker::new(ffprobe_path);
 
-    move |data: &[u8]| {
-        checker
-            .identify(logger.clone(), data)
-    }
+    move |data: &[u8]| checker.identify(logger.clone(), data)
 }
 
 #[cfg(not(use_ffmpeg_sys))]
@@ -41,8 +34,8 @@ mod inner {
     use serde::Deserialize;
     use slog::Logger;
 
-    use crate::errors::BackendError;
     use crate::audio::format::AudioFormat;
+    use crate::errors::BackendError;
 
     lazy_static! {
         static ref FFPROBE_ARGS: Vec<OsString> = vec![
@@ -80,11 +73,7 @@ mod inner {
     impl Checker {}
 
     impl super::CodecChecker for Checker {
-        fn identify(
-            &self,
-            _logger: Arc<Logger>,
-            data: &[u8]
-        ) -> Result<AudioFormat, BackendError> {
+        fn identify(&self, _logger: Arc<Logger>, data: &[u8]) -> Result<AudioFormat, BackendError> {
             use std::io::Write;
             use std::process::Command;
 

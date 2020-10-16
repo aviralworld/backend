@@ -14,7 +14,7 @@ impl MimeType {
             id,
             audio_format,
             essence,
-            extension
+            extension,
         }
     }
 }

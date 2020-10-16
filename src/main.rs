@@ -32,10 +32,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let logger = Arc::new(logger);
 
     let ffprobe_path = get_ffprobe(env::var("BACKEND_FFPROBE_PATH").ok());
-    let checker = Arc::new(audio::make_wrapper(
-        logger.clone(),
-        ffprobe_path,
-    ));
+    let checker = Arc::new(audio::make_wrapper(logger.clone(), ffprobe_path));
 
     let connection_string = get_variable("BACKEND_DB_CONNECTION_STRING");
     let pool = sqlx::Pool::new(&connection_string)

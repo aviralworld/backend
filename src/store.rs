@@ -21,7 +21,12 @@ pub trait Store: Send + Sync {
     fn get_url(&self, key: &Uuid) -> Result<Url, ParseError>;
 
     /// Saves the given data under the given key.
-    fn save(&self, key: &Uuid, content_type: String, raw: Self::Raw) -> BoxFuture<Result<Self::Output, BackendError>>;
+    fn save(
+        &self,
+        key: &Uuid,
+        content_type: String,
+        raw: Self::Raw,
+    ) -> BoxFuture<Result<Self::Output, BackendError>>;
 }
 
 /// A store that saves its data to S3.
@@ -78,13 +83,7 @@ impl S3Store {
 
         let base_url = Url::parse(&get_variable("S3_BASE_URL")).expect("parse S3_BASE_URL");
 
-        Ok(S3Store::new(
-            client,
-            acl,
-            bucket,
-            cache_control,
-            base_url,
-        ))
+        Ok(S3Store::new(client, acl, bucket, cache_control, base_url))
     }
 }
 
@@ -100,7 +99,12 @@ impl Store for S3Store {
         self.base_url.join(&key.to_string())
     }
 
-    fn save<'a>(&self, key: &Uuid, content_type: String, raw: Vec<u8>) -> BoxFuture<Result<(), BackendError>> {
+    fn save<'a>(
+        &self,
+        key: &Uuid,
+        content_type: String,
+        raw: Vec<u8>,
+    ) -> BoxFuture<Result<(), BackendError>> {
         upload(self, *key, content_type, raw).boxed()
     }
 }
@@ -119,7 +123,12 @@ async fn delete(store: &S3Store, key: Uuid) -> Result<(), BackendError> {
         .map_err(|source| BackendError::DeleteFailed { source })
 }
 
-async fn upload(store: &S3Store, key: Uuid, content_type: String, raw: Vec<u8>) -> Result<(), BackendError> {
+async fn upload(
+    store: &S3Store,
+    key: Uuid,
+    content_type: String,
+    raw: Vec<u8>,
+) -> Result<(), BackendError> {
     use std::convert::TryFrom;
 
     let len = i64::try_from(raw.len()).expect("raw data length must be within range of i64");

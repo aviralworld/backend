@@ -2,8 +2,8 @@ use futures::future::BoxFuture;
 use url::Url;
 use uuid::Uuid;
 
-use crate::{errors::BackendError, audio::format::AudioFormat, mime_type::MimeType};
 use crate::recording::{ChildRecording, NewRecording, Recording, UploadMetadata};
+use crate::{audio::format::AudioFormat, errors::BackendError, mime_type::MimeType};
 
 pub trait Db {
     fn children(&self, id: &Uuid) -> BoxFuture<Result<Vec<ChildRecording>, BackendError>>;
@@ -18,9 +18,17 @@ pub trait Db {
 
     fn retrieve(&self, id: &Uuid) -> BoxFuture<Result<Option<Recording>, BackendError>>;
 
-    fn retrieve_mime_type(&self, format: &AudioFormat) -> BoxFuture<Result<Option<MimeType>, BackendError>>;
+    fn retrieve_mime_type(
+        &self,
+        format: &AudioFormat,
+    ) -> BoxFuture<Result<Option<MimeType>, BackendError>>;
 
-    fn update_url(&self, id: &Uuid, url: &Url, mime_type: MimeType) -> BoxFuture<Result<(), BackendError>>;
+    fn update_url(
+        &self,
+        id: &Uuid,
+        url: &Url,
+        mime_type: MimeType,
+    ) -> BoxFuture<Result<(), BackendError>>;
 }
 
 pub use self::postgres::*;
@@ -37,8 +45,8 @@ mod postgres {
     use url::Url;
     use uuid::Uuid;
 
-    use crate::{errors::BackendError, audio::format::AudioFormat, mime_type::MimeType};
     use crate::recording::{ChildRecording, Id, NewRecording, Recording, Times, UploadMetadata};
+    use crate::{audio::format::AudioFormat, errors::BackendError, mime_type::MimeType};
 
     static DEFAULT_URL: Option<String> = None;
 
@@ -84,11 +92,19 @@ mod postgres {
             retrieve(*id, &self.pool).boxed()
         }
 
-        fn retrieve_mime_type(&self, format: &AudioFormat) -> BoxFuture<Result<Option<MimeType>, BackendError>> {
+        fn retrieve_mime_type(
+            &self,
+            format: &AudioFormat,
+        ) -> BoxFuture<Result<Option<MimeType>, BackendError>> {
             retrieve_mime_type(format.clone(), &self.pool).boxed()
         }
 
-        fn update_url(&self, id: &Uuid, url: &Url, mime_type: MimeType) -> BoxFuture<Result<(), BackendError>> {
+        fn update_url(
+            &self,
+            id: &Uuid,
+            url: &Url,
+            mime_type: MimeType,
+        ) -> BoxFuture<Result<(), BackendError>> {
             update_url(*id, url.clone(), mime_type, &self.pool).boxed()
         }
     }
@@ -196,7 +212,10 @@ mod postgres {
         Ok(recording)
     }
 
-    async fn retrieve_mime_type(format: AudioFormat, pool: &PgPool) -> Result<Option<MimeType>, BackendError> {
+    async fn retrieve_mime_type(
+        format: AudioFormat,
+        pool: &PgPool,
+    ) -> Result<Option<MimeType>, BackendError> {
         let query = sqlx::query(include_str!("queries/retrieve_mime_type.sql"));
 
         let mime_type: Option<MimeType> = query
@@ -209,7 +228,12 @@ mod postgres {
                 let codec: String = try_get(&row, "codec")?;
                 let extension: String = try_get(&row, "extension")?;
 
-                Ok(MimeType::new(id, AudioFormat::new(container, codec), essence, extension))
+                Ok(MimeType::new(
+                    id,
+                    AudioFormat::new(container, codec),
+                    essence,
+                    extension,
+                ))
             })
             .fetch_optional(pool)
             .await
@@ -218,7 +242,12 @@ mod postgres {
         Ok(mime_type)
     }
 
-    async fn update_url(id: Uuid, url: Url, mime_type: MimeType, pool: &PgPool) -> Result<(), BackendError> {
+    async fn update_url(
+        id: Uuid,
+        url: Url,
+        mime_type: MimeType,
+        pool: &PgPool,
+    ) -> Result<(), BackendError> {
         let query = sqlx::query(include_str!("queries/update_url.sql"));
 
         let _ = query
@@ -269,7 +298,8 @@ mod postgres {
         let occupation: Option<String> = try_get(&row, "occupation")?;
 
         Ok(Recording::Active(ActiveRecording::new(
-            id, times, name, parent_id, url, mime_type, category, gender, age, location, occupation, unlisted,
+            id, times, name, parent_id, url, mime_type, category, gender, age, location,
+            occupation, unlisted,
         )))
     }
 

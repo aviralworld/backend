@@ -11,11 +11,11 @@ use warp::reject;
 use warp::reply::{json, with_header, with_status, Json, Reply, WithHeader, WithStatus};
 use warp::Filter;
 
-use crate::{db::Db, audio::format::AudioFormat, environment, mime_type::MimeType};
 use crate::environment::Environment;
 use crate::errors::BackendError;
 use crate::io::parse_upload;
 use crate::recording::{ChildRecording, UploadMetadata};
+use crate::{audio::format::AudioFormat, db::Db, environment, mime_type::MimeType};
 
 mod rejection;
 
@@ -211,31 +211,44 @@ async fn process_upload<O: Clone + Send + Sync>(
 
     // should this punt to a queue? is that necessary?
     debug!(logger, "Saving recording to store...");
-    let mime_type = db.retrieve_mime_type(&audio_format).await.map_err(&error_handler)?;
+    let mime_type = db
+        .retrieve_mime_type(&audio_format)
+        .await
+        .map_err(&error_handler)?;
 
     match mime_type {
         Some(mime_type) => {
-            save_upload_audio(logger.clone(), store.clone(), &id, mime_type.essence.clone(), verified_audio)
+            save_upload_audio(
+                logger.clone(),
+                store.clone(),
+                &id,
+                mime_type.essence.clone(),
+                verified_audio,
+            )
             .await
             .map_err(&error_handler)?;
 
-        debug!(logger, "Updating recording URL...");
-        update_recording_url(logger.clone(), db.clone(), store.clone(), &id, mime_type)
-            .await
-            .map_err(&error_handler)?;
+            debug!(logger, "Updating recording URL...");
+            update_recording_url(logger.clone(), db.clone(), store.clone(), &id, mime_type)
+                .await
+                .map_err(&error_handler)?;
 
-        debug!(logger, "Sending response...");
-        let response = SuccessResponse::Upload {
-            id: id_as_str.clone(),
-        };
+            debug!(logger, "Sending response...");
+            let response = SuccessResponse::Upload {
+                id: id_as_str.clone(),
+            };
 
-        Ok(with_header(
-            with_status(json(&response), StatusCode::CREATED),
-            "location",
-            urls.recording(&id).as_str(),
-        ))}
+            Ok(with_header(
+                with_status(json(&response), StatusCode::CREATED),
+                "location",
+                urls.recording(&id).as_str(),
+            ))
+        }
         // why does this work but not directly returning `Err(error_handler(BackendError::...))`?
-        None => Err(BackendError::InvalidAudioFormat { format: audio_format }).map_err(&error_handler)?,
+        None => Err(BackendError::InvalidAudioFormat {
+            format: audio_format,
+        })
+        .map_err(&error_handler)?,
     }
 }
 

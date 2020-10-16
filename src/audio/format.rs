@@ -21,7 +21,9 @@ impl FromStr for AudioFormat {
         let mut parts = s.split(DELIMITER);
 
         match (parts.next(), parts.next(), parts.next()) {
-            (Some(format), Some(codec), None) => Ok(AudioFormat::new(format.to_owned(), codec.to_owned())),
+            (Some(format), Some(codec), None) => {
+                Ok(AudioFormat::new(format.to_owned(), codec.to_owned()))
+            }
             _ => Err(ParseError),
         }
     }

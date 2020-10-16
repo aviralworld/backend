@@ -10,13 +10,16 @@ use slog::{self, o, Logger};
 use url::Url;
 use warp::http::StatusCode;
 
-use backend::{config::{get_ffprobe, get_variable}, audio::format::AudioFormat};
 use backend::db::Db;
 use backend::environment::Environment;
 use backend::errors;
 use backend::routes;
 use backend::store::S3Store;
 use backend::urls::Urls;
+use backend::{
+    audio::format::AudioFormat,
+    config::{get_ffprobe, get_variable},
+};
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -289,7 +292,15 @@ async fn test_deletion(id_to_delete: &str, parent: &str, ids: &[String]) {
             .await
             .expect("verify recording exists in store before deleting");
         assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(response.headers().get("content-type").expect("get content-type header").to_str().expect("convert content-type header to string"), "audio/ogg; codec=opus");
+        assert_eq!(
+            response
+                .headers()
+                .get("content-type")
+                .expect("get content-type header")
+                .to_str()
+                .expect("convert content-type header to string"),
+            "audio/ogg; codec=opus"
+        );
     }
 
     let delete_filter = make_delete_filter("api_works").await;
@@ -531,7 +542,8 @@ fn upload_file(
     boundary: &[u8],
     metadata: &[u8],
 ) -> warp::test::RequestBuilder {
-    let data = fs::read(path.as_ref()).unwrap_or_else(|_| panic!("read file {:?}", path.as_ref().display()));
+    let data = fs::read(path.as_ref())
+        .unwrap_or_else(|_| panic!("read file {:?}", path.as_ref().display()));
     let body = make_multipart_body(boundary, metadata, &data);
 
     warp::test::request()
@@ -627,8 +639,7 @@ fn initialize_db_for_test(connection_string: &str) {
 
 fn make_multipart_body(boundary: &[u8], metadata: &[u8], content: &[u8]) -> Vec<u8> {
     const NEWLINE: &[u8] = b"\r\n";
-    const METADATA_HEADER: &[u8] =
-        b"Content-Disposition: form-data; name=\"metadata\"\r\n\r\n";
+    const METADATA_HEADER: &[u8] = b"Content-Disposition: form-data; name=\"metadata\"\r\n\r\n";
     const AUDIO_HEADER: &[u8] =
         b"Content-Disposition: form-data; name=\"audio\"\r\nContent-Type: audio/ogg\r\n\r\n";
 
