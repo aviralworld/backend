@@ -31,9 +31,6 @@ pub struct ActiveRecording {
     /// The category it falls into.
     category: Label,
 
-    /// Whether this recording is hidden from public view.
-    unlisted: bool,
-
     /// The ID of the recording it follows, if any.
     parent: Option<Uuid>,
 
@@ -68,7 +65,6 @@ impl ActiveRecording {
         age: Option<Label>,
         location: Option<String>,
         occupation: Option<String>,
-        unlisted: bool,
     ) -> Self {
         ActiveRecording {
             id,
@@ -82,7 +78,6 @@ impl ActiveRecording {
             age,
             location,
             occupation,
-            unlisted,
         }
     }
 }
@@ -185,9 +180,6 @@ pub struct UploadMetadata {
 
     /// The ID of the category it falls into.
     pub(crate) category_id: Id,
-
-    /// Whether this recording is hidden from public view.
-    pub(crate) unlisted: bool,
 }
 
 /// A simplified view of a recording that follows another.

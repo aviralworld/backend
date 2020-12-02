@@ -12,8 +12,6 @@ pub trait Db {
 
     fn delete(&self, id: &Uuid) -> BoxFuture<Result<(), BackendError>>;
 
-    fn hide(&self, id: &Uuid) -> BoxFuture<Result<(), BackendError>>;
-
     fn insert(&self, metadata: UploadMetadata) -> BoxFuture<Result<NewRecording, BackendError>>;
 
     fn retrieve(&self, id: &Uuid) -> BoxFuture<Result<Option<Recording>, BackendError>>;
@@ -77,10 +75,6 @@ mod postgres {
 
         fn delete(&self, id: &Uuid) -> BoxFuture<Result<(), BackendError>> {
             delete(*id, &self.pool).boxed()
-        }
-
-        fn hide(&self, id: &Uuid) -> BoxFuture<Result<(), BackendError>> {
-            hide(*id, &self.pool).boxed()
         }
 
         fn insert(
@@ -152,19 +146,6 @@ mod postgres {
         }
     }
 
-    async fn hide(id: Uuid, pool: &PgPool) -> Result<(), BackendError> {
-        let query = sqlx::query(include_str!("queries/update_privacy.sql"));
-
-        let _ = query
-            .bind(id)
-            .bind(true)
-            .execute(pool)
-            .await
-            .map_err(map_sqlx_error)?;
-
-        Ok(())
-    }
-
     async fn insert(metadata: UploadMetadata, pool: &PgPool) -> Result<NewRecording, BackendError> {
         use sqlx::prelude::*;
 
@@ -176,7 +157,6 @@ mod postgres {
             .bind(None::<Option<i16>>)
             .bind(&metadata.category_id)
             .bind(&metadata.parent_id)
-            .bind(&metadata.unlisted)
             .bind(&metadata.name)
             .bind(&metadata.location)
             .bind(&metadata.occupation)
@@ -299,7 +279,6 @@ mod postgres {
             };
 
         let name: String = try_get(&row, "name")?;
-        let unlisted: bool = try_get(&row, "unlisted")?;
         let url: String = try_get(&row, "url")?;
         let url: Url = Url::parse(&url).map_err(|source| {
             // this should never happen, since we control the URLs
@@ -316,8 +295,7 @@ mod postgres {
         let occupation: Option<String> = try_get(&row, "occupation")?;
 
         Ok(Recording::Active(ActiveRecording::new(
-            id, times, name, parent_id, url, mime_type, category, gender, age, location,
-            occupation, unlisted,
+            id, times, name, parent_id, url, mime_type, category, gender, age, location, occupation,
         )))
     }
 

@@ -46,6 +46,7 @@ pub fn make_formats_route<'a, O: Clone + Send + Sync + 'a>(
     let recordings_path = environment.urls.recordings_path.clone();
     let logger = environment.logger.clone();
 
+    // TODO make this cacheable
     warp::path(recordings_path)
         .and(warp::path("formats"))
         .and(warp::path::end())
@@ -150,27 +151,6 @@ pub fn make_retrieve_route<'a, O: Clone + Send + Sync + 'a>(
         .and_then(
             move |id| -> BoxFuture<Result<WithStatus<Json>, reject::Rejection>> {
                 retrieve_recording(environment.clone(), id).boxed()
-            },
-        )
-        .recover(move |r| format_rejection(logger.clone(), r))
-}
-
-pub fn make_hide_route<'a, O: Clone + Send + Sync + 'a>(
-    environment: Environment<O>,
-) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
-    let logger = environment.logger.clone();
-
-    let recordings_path = environment.urls.recordings_path.clone();
-
-    warp::path(recordings_path)
-        .and(warp::path("id"))
-        .and(warp::path::param::<String>())
-        .and(warp::path("hide"))
-        .and(warp::path::end())
-        .and(warp::post())
-        .and_then(
-            move |id| -> BoxFuture<Result<StatusCode, reject::Rejection>> {
-                hide_recording(environment.clone(), id).boxed()
             },
         )
         .recover(move |r| format_rejection(logger.clone(), r))
@@ -344,23 +324,6 @@ async fn retrieve_recording<O: Clone + Send + Sync>(
         }
         None => Ok(with_status(json(&()), StatusCode::NOT_FOUND)),
     }
-}
-
-async fn hide_recording<O: Clone + Send + Sync>(
-    environment: Environment<O>,
-    id: String,
-) -> Result<StatusCode, reject::Rejection> {
-    let error_handler =
-        |e: BackendError| rejection::Rejection::new(rejection::Context::hide(id.clone()), e);
-
-    let id = Uuid::parse_str(&id)
-        .map_err(|_| BackendError::InvalidId(id.clone()))
-        .map_err(error_handler)?;
-    debug!(environment.logger, "Hiding recording..."; "id" => format!("{}", &id));
-
-    environment.db.hide(&id).await.map_err(error_handler)?;
-
-    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn verify_audio(

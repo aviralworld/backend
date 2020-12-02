@@ -1,12 +1,10 @@
 [{
         "name": "some person",
-        "category_id": 3,
-        "unlisted": false
+        "category_id": 3
     },
     {
         "name": "कोई",
         "category_id": 1,
-        "unlisted": true,
         "age_id": 3,
         "gender_id": 4,
         "location": "कहीं",
@@ -15,14 +13,12 @@
     {
         "name": "\nAnother \r\nname",
         "category_id": 1,
-        "unlisted": false,
         "gender_id": 2,
         "occupation": "something"
     },
     {
         "name": "Myself",
         "category_id": 2,
-        "unlisted": false,
         "age_id": 4,
         "location": "Somewhere out there"
     }

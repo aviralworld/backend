@@ -46,15 +46,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let children_route = routes::make_children_route(environment.clone());
     let delete_route = routes::make_delete_route(environment.clone());
     let retrieve_route = routes::make_retrieve_route(environment.clone());
-    let hide_route = routes::make_hide_route(environment.clone());
 
     let routes = formats_route
         .or(count_route)
         .or(upload_route)
         .or(children_route)
         .or(delete_route)
-        .or(retrieve_route)
-        .or(hide_route);
+        .or(retrieve_route);
 
     let port: u16 = get_variable("BACKEND_PORT")
         .parse()

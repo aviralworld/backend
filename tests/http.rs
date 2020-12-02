@@ -37,43 +37,6 @@ struct RetrievalResponse {
     created_at: i64,
     updated_at: i64,
     category: RelatedLabel,
-    unlisted: bool,
-    parent: Option<String>,
-    name: String,
-    age: Option<RelatedLabel>,
-    gender: Option<RelatedLabel>,
-    location: Option<String>,
-    occupation: Option<String>,
-}
-
-impl RetrievalResponse {
-    fn into_comparable(self) -> ComparableRetrievalResponse {
-        ComparableRetrievalResponse {
-            id: self.id,
-            url: self.url,
-            mime_type: self.mime_type,
-            created_at: self.created_at,
-            category: self.category,
-            unlisted: self.unlisted,
-            parent: self.parent,
-            name: self.name,
-            age: self.age,
-            gender: self.gender,
-            location: self.location,
-            occupation: self.occupation,
-        }
-    }
-}
-
-// this is RetrievalResponse minus updated_at
-#[derive(Debug, PartialEq)]
-struct ComparableRetrievalResponse {
-    id: String,
-    url: String,
-    mime_type: RelatedLabel,
-    created_at: i64,
-    category: RelatedLabel,
-    unlisted: bool,
     parent: Option<String>,
     name: String,
     age: Option<RelatedLabel>,
@@ -113,12 +76,10 @@ async fn api_works() {
 
     let ids = test_uploading_children(&file_path, &content_type, &id, children).await;
 
-    let id_to_delete = ids.get(1).expect("get second child ID");
+    let id_to_delete = ids.get(2).expect("get third child ID");
     test_deletion(id_to_delete, &id, &ids).await;
 
     test_count().await;
-
-    test_updating(ids.iter().last().expect("get last child ID")).await;
 }
 
 async fn test_formats() {
@@ -261,7 +222,6 @@ async fn test_uploading_child(
 ) -> Option<String> {
     let filter = make_upload_filter("test_uploading_child").await;
     let object = child.as_object_mut().expect("get child as object");
-    let unlisted = object["unlisted"].as_bool().unwrap_or(false);
     object.insert("parent_id".to_owned(), serde_json::json!(id));
     let bytes = serde_json::to_vec(&object).expect("serialize edited child as JSON");
 
@@ -282,11 +242,7 @@ async fn test_uploading_child(
         .id
         .unwrap();
 
-    if unlisted {
-        None
-    } else {
-        Some(id)
-    }
+    Some(id)
 }
 
 async fn test_deletion(id_to_delete: &str, parent: &str, ids: &[String]) {
@@ -368,39 +324,6 @@ async fn test_count() {
         .expect("parse count response as i64");
 
     assert_eq!(count, 4);
-}
-
-async fn test_updating(id: &str) {
-    // can be simplified once async closures are stabilized (rust-lang/rust#62290)
-    async fn retrieve(id: &str) -> RetrievalResponse {
-        let retrieve_filter = make_retrieve_filter("test_updating").await;
-        let response = warp::test::request()
-            .path(&format!("/recs/id/{id}/", id = id))
-            .method("GET")
-            .reply(&retrieve_filter)
-            .await;
-
-        serde_json::from_slice(response.body()).expect("deserialize retrieved recording")
-    }
-
-    let before = retrieve(id).await.into_comparable();
-
-    let response = warp::test::request()
-        .path(&format!("/recs/id/{id}/hide/", id = id))
-        .method("POST")
-        .reply(&make_hide_filter("uploading works").await)
-        .await;
-    assert_eq!(response.status(), StatusCode::NO_CONTENT);
-
-    let after = retrieve(id).await.into_comparable();
-
-    assert_eq!(
-        after,
-        ComparableRetrievalResponse {
-            unlisted: true,
-            ..before
-        }
-    );
 }
 
 #[tokio::test]
@@ -492,14 +415,6 @@ async fn make_count_filter<'a>(
     let environment = make_environment(test_name.into()).await;
 
     routes::make_count_route(environment)
-}
-
-async fn make_hide_filter<'a>(
-    test_name: impl Into<String>,
-) -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::reject::Rejection> + 'a {
-    let environment = make_environment(test_name.into()).await;
-
-    routes::make_hide_route(environment)
 }
 
 fn parse_children_ids(body: &[u8]) -> Vec<String> {
@@ -601,7 +516,6 @@ fn verify_recording_data(recording: &RetrievalResponse, id: &str, parent_id: &st
         recording.category,
         RelatedLabel(1, "This is a category".to_owned())
     );
-    assert_eq!(recording.unlisted, false);
     assert_eq!(recording.parent, Some(parent_id.to_owned()));
     assert_eq!(recording.name, "Another \r\nname");
     assert_eq!(recording.age, None);
