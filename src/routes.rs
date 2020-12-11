@@ -57,6 +57,57 @@ pub fn make_formats_route<'a, O: Clone + Send + Sync + 'a>(
         .recover(move |r| format_rejection(logger.clone(), r))
 }
 
+pub fn make_ages_list_route<'a, O: Clone + Send + Sync + 'a>(
+    environment: Environment<O>,
+) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
+    let recordings_path = environment.urls.recordings_path.clone();
+    let logger = environment.logger.clone();
+
+    // TODO make this cacheable
+    warp::path(recordings_path)
+        .and(warp::path("ages"))
+        .and(warp::path::end())
+        .and(warp::get())
+        .and_then(move || -> BoxFuture<Result<Json, reject::Rejection>> {
+            get_ages(environment.clone()).boxed()
+        })
+        .recover(move |r| format_rejection(logger.clone(), r))
+}
+
+pub fn make_categories_list_route<'a, O: Clone + Send + Sync + 'a>(
+    environment: Environment<O>,
+) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
+    let recordings_path = environment.urls.recordings_path.clone();
+    let logger = environment.logger.clone();
+
+    // TODO make this cacheable
+    warp::path(recordings_path)
+        .and(warp::path("categories"))
+        .and(warp::path::end())
+        .and(warp::get())
+        .and_then(move || -> BoxFuture<Result<Json, reject::Rejection>> {
+            get_categories(environment.clone()).boxed()
+        })
+        .recover(move |r| format_rejection(logger.clone(), r))
+}
+
+pub fn make_genders_list_route<'a, O: Clone + Send + Sync + 'a>(
+    environment: Environment<O>,
+) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
+    let recordings_path = environment.urls.recordings_path.clone();
+    let logger = environment.logger.clone();
+
+    // TODO make this cacheable
+    warp::path(recordings_path)
+        .and(warp::path("genders"))
+        .and(warp::path::end())
+        .and(warp::get())
+        .and_then(move || -> BoxFuture<Result<Json, reject::Rejection>> {
+            get_genders(environment.clone()).boxed()
+        })
+        .recover(move |r| format_rejection(logger.clone(), r))
+}
+
 pub fn make_count_route<'a, O: Clone + Send + Sync + 'a>(
     environment: Environment<O>,
 ) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
@@ -166,6 +217,42 @@ async fn get_formats<O: Clone + Send + Sync>(
         .map_err(|e: BackendError| rejection::Rejection::new(rejection::Context::formats(), e))?;
 
     Ok(json(&formats))
+}
+
+async fn get_ages<O: Clone + Send + Sync>(
+    environment: Environment<O>,
+) -> Result<Json, reject::Rejection> {
+    let ages = environment
+        .db
+        .retrieve_ages()
+        .await
+        .map_err(|e: BackendError| rejection::Rejection::new(rejection::Context::ages(), e))?;
+
+    Ok(json(&ages))
+}
+
+async fn get_categories<O: Clone + Send + Sync>(
+    environment: Environment<O>,
+) -> Result<Json, reject::Rejection> {
+    let categories = environment
+        .db
+        .retrieve_categories()
+        .await
+        .map_err(|e: BackendError| rejection::Rejection::new(rejection::Context::categories(), e))?;
+
+    Ok(json(&categories))
+}
+
+async fn get_genders<O: Clone + Send + Sync>(
+    environment: Environment<O>,
+) -> Result<Json, reject::Rejection> {
+    let genders = environment
+        .db
+        .retrieve_genders()
+        .await
+        .map_err(|e: BackendError| rejection::Rejection::new(rejection::Context::genders(), e))?;
+
+    Ok(json(&genders))
 }
 
 async fn get_recording_count<O: Clone + Send + Sync>(

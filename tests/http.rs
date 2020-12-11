@@ -4,6 +4,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::sync::Once;
 
+use lazy_static::lazy_static;
 use once_cell::sync::OnceCell;
 use serde::Deserialize;
 use slog::{self, o, Logger};
@@ -47,7 +48,7 @@ struct RetrievalResponse {
 
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
-struct RelatedLabel(i8, String);
+struct RelatedLabel(i16, String);
 
 static SLOG_SCOPE_GUARD: OnceCell<slog_scope::GlobalLoggerGuard> = OnceCell::new();
 
@@ -56,6 +57,9 @@ const BOUNDARY: &str = "thisisaboundary1234";
 #[tokio::test]
 async fn api_works() {
     test_formats().await;
+    test_ages().await;
+    test_categories().await;
+    test_genders().await;
 
     test_non_existent_recording().await;
 
@@ -95,6 +99,98 @@ async fn test_formats() {
         serde_json::from_str::<Vec<String>>(&body).expect("parse response as Vec<String>");
 
     assert_eq!(formats, vec!["audio/ogg; codec=opus", "audio/ogg"]);
+}
+
+async fn test_ages() {
+    lazy_static! {
+        static ref AGES: Vec<RelatedLabel> = {
+            vec![
+                RelatedLabel(1, String::from("Age 1")),
+                RelatedLabel(2, String::from("Age B")),
+                RelatedLabel(3, String::from("Age three")),
+                RelatedLabel(4, String::from("Fooled ya! This is Age 2")),
+            ]
+        };
+    }
+
+    let response = warp::test::request()
+        .path("/recs/ages")
+        .method("GET")
+        .reply(&make_ages_list_filter("test_ages").await)
+        .await;
+
+    assert_eq!(response.status(), 200);
+
+    let body = String::from_utf8_lossy(response.body()).into_owned();
+
+    let ages = serde_json::from_str::<Vec<RelatedLabel>>(&body)
+        .expect("parse response as Vec<RelatedLabel>");
+
+    assert_eq!(ages, *AGES);
+}
+
+async fn test_categories() {
+    lazy_static! {
+        static ref CATEGORIES: Vec<RelatedLabel> = {
+            vec![
+                RelatedLabel(6, String::from("This is a category")),
+                RelatedLabel(2, String::from("Some other category")),
+                RelatedLabel(
+                    7,
+                    "This category has
+  some newlines
+and spaces in it"
+                        .to_owned(),
+                ),
+                RelatedLabel(3, String::from("यह हिन्दी है ।")),
+                RelatedLabel(4, String::from("Ceci n’est pas une catégorie")),
+                RelatedLabel(1, String::from("یہ بھی ہے")),
+            ]
+        };
+    }
+
+    let response = warp::test::request()
+        .path("/recs/categories")
+        .method("GET")
+        .reply(&make_categories_list_filter("test_categories").await)
+        .await;
+
+    assert_eq!(response.status(), 200);
+
+    let body = String::from_utf8_lossy(response.body()).into_owned();
+
+    let categories = serde_json::from_str::<Vec<RelatedLabel>>(&body)
+        .expect("parse response as Vec<RelatedLabel>");
+
+    assert_eq!(categories, *CATEGORIES);
+}
+
+async fn test_genders() {
+    lazy_static! {
+        static ref GENDERS: Vec<RelatedLabel> = {
+            vec![
+                RelatedLabel(1, String::from("One of the genders")),
+                RelatedLabel(2, String::from("Some other genders")),
+                RelatedLabel(3, String::from("No gender specified")),
+                RelatedLabel(50, String::from("None of the above")),
+            ]
+        };
+    }
+
+    let response = warp::test::request()
+        .path("/recs/genders")
+        .method("GET")
+        .reply(&make_genders_list_filter("test_genders").await)
+        .await;
+
+    assert_eq!(response.status(), 200);
+
+    let body = String::from_utf8_lossy(response.body()).into_owned();
+
+    let genders = serde_json::from_str::<Vec<RelatedLabel>>(&body)
+        .expect("parse response as Vec<RelatedLabel>");
+
+    assert_eq!(genders, *GENDERS);
 }
 
 async fn test_upload(file_path: impl AsRef<Path>, content_type: impl AsRef<str>) -> String {
@@ -417,6 +513,30 @@ async fn make_count_filter<'a>(
     routes::make_count_route(environment)
 }
 
+async fn make_ages_list_filter<'a>(
+    test_name: impl Into<String>,
+) -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::reject::Rejection> + 'a {
+    let environment = make_environment(test_name.into()).await;
+
+    routes::make_ages_list_route(environment)
+}
+
+async fn make_categories_list_filter<'a>(
+    test_name: impl Into<String>,
+) -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::reject::Rejection> + 'a {
+    let environment = make_environment(test_name.into()).await;
+
+    routes::make_categories_list_route(environment)
+}
+
+async fn make_genders_list_filter<'a>(
+    test_name: impl Into<String>,
+) -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::reject::Rejection> + 'a {
+    let environment = make_environment(test_name.into()).await;
+
+    routes::make_genders_list_route(environment)
+}
+
 fn parse_children_ids(body: &[u8]) -> Vec<String> {
     #[derive(Debug, Deserialize)]
     #[serde(deny_unknown_fields)]
@@ -514,7 +634,7 @@ fn verify_recording_data(recording: &RetrievalResponse, id: &str, parent_id: &st
     // serde has already verified that the times are i64s, i.e. valid as Unix timestamps
     assert_eq!(
         recording.category,
-        RelatedLabel(1, "This is a category".to_owned())
+        RelatedLabel(1, "یہ بھی ہے".to_owned())
     );
     assert_eq!(recording.parent, Some(parent_id.to_owned()));
     assert_eq!(recording.name, "Another \r\nname");

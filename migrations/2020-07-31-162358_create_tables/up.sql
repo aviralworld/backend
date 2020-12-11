@@ -3,18 +3,21 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE TABLE IF NOT EXISTS "ages" (
     id smallserial,
     label character varying(50) NOT NULL UNIQUE,
+    enabled boolean NOT NULL DEFAULT TRUE,
     PRIMARY KEY (id)
 );
 
 CREATE TABLE IF NOT EXISTS "genders" (
     id smallserial,
     label character varying(100) NOT NULL UNIQUE,
+    enabled boolean NOT NULL DEFAULT TRUE,
     PRIMARY KEY (id)
 );
 
 CREATE TABLE IF NOT EXISTS "categories" (
     id smallserial,
     label text NOT NULL UNIQUE,
+    enabled boolean NOT NULL DEFAULT TRUE,
     PRIMARY KEY (id)
 );
 

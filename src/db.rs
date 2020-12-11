@@ -2,8 +2,9 @@ use futures::future::BoxFuture;
 use url::Url;
 use uuid::Uuid;
 
-use crate::recording::{ChildRecording, NewRecording, Recording, UploadMetadata};
 use crate::{audio::format::AudioFormat, errors::BackendError, mime_type::MimeType};
+use crate::label::Label;
+use crate::recording::{ChildRecording, NewRecording, Recording, UploadMetadata};
 
 pub trait Db {
     fn children(&self, id: &Uuid) -> BoxFuture<Result<Vec<ChildRecording>, BackendError>>;
@@ -16,7 +17,13 @@ pub trait Db {
 
     fn retrieve(&self, id: &Uuid) -> BoxFuture<Result<Option<Recording>, BackendError>>;
 
+    fn retrieve_ages(&self) -> BoxFuture<Result<Vec<Label>, BackendError>>;
+
+    fn retrieve_categories(&self) -> BoxFuture<Result<Vec<Label>, BackendError>>;
+
     fn retrieve_format_essences(&self) -> BoxFuture<Result<Vec<String>, BackendError>>;
+
+    fn retrieve_genders(&self) -> BoxFuture<Result<Vec<Label>, BackendError>>;
 
     fn retrieve_mime_type(
         &self,
@@ -45,8 +52,9 @@ mod postgres {
     use url::Url;
     use uuid::Uuid;
 
-    use crate::recording::{ChildRecording, Id, NewRecording, Recording, Times, UploadMetadata};
     use crate::{audio::format::AudioFormat, errors::BackendError, mime_type::MimeType};
+    use crate::label::{Id, Label};
+    use crate::recording::{ChildRecording, NewRecording, Recording, Times, UploadMetadata};
 
     static DEFAULT_URL: Option<String> = None;
 
@@ -88,8 +96,20 @@ mod postgres {
             retrieve(*id, &self.pool).boxed()
         }
 
+        fn retrieve_ages(&self) -> BoxFuture<Result<Vec<Label>, BackendError>> {
+            retrieve_ages(&self.pool).boxed()
+        }
+
+        fn retrieve_categories(&self) -> BoxFuture<Result<Vec<Label>, BackendError>> {
+            retrieve_categories(&self.pool).boxed()
+        }
+
         fn retrieve_format_essences(&self) -> BoxFuture<Result<Vec<String>, BackendError>> {
             retrieve_format_essences(&self.pool).boxed()
+        }
+
+        fn retrieve_genders(&self) -> BoxFuture<Result<Vec<Label>, BackendError>> {
+            retrieve_genders(&self.pool).boxed()
         }
 
         fn retrieve_mime_type(
@@ -198,6 +218,30 @@ mod postgres {
         Ok(recording)
     }
 
+    async fn retrieve_ages(pool: &PgPool) -> Result<Vec<Label>, BackendError> {
+        let query = sqlx::query(include_str!("queries/retrieve_ages.sql"));
+
+        let ages: Vec<Label> = query
+            .try_map(|row: PgRow| Ok(Label::new(try_get(&row, "id")?, try_get(&row, "label")?)))
+            .fetch_all(pool)
+            .await
+            .map_err(map_sqlx_error)?;
+
+        Ok(ages)
+    }
+
+    async fn retrieve_categories(pool: &PgPool) -> Result<Vec<Label>, BackendError> {
+        let query = sqlx::query(include_str!("queries/retrieve_categories.sql"));
+
+        let categories: Vec<Label> = query
+            .try_map(|row: PgRow| Ok(Label::new(try_get(&row, "id")?, try_get(&row, "label")?)))
+            .fetch_all(pool)
+            .await
+            .map_err(map_sqlx_error)?;
+
+        Ok(categories)
+    }
+
     async fn retrieve_format_essences(pool: &PgPool) -> Result<Vec<String>, BackendError> {
         let query = sqlx::query(include_str!("queries/retrieve_format_essences.sql"));
 
@@ -208,6 +252,18 @@ mod postgres {
             .map_err(map_sqlx_error)?;
 
         Ok(essences)
+    }
+
+    async fn retrieve_genders(pool: &PgPool) -> Result<Vec<Label>, BackendError> {
+        let query = sqlx::query(include_str!("queries/retrieve_genders.sql"));
+
+        let genders: Vec<Label> = query
+            .try_map(|row: PgRow| Ok(Label::new(try_get(&row, "id")?, try_get(&row, "label")?)))
+            .fetch_all(pool)
+            .await
+            .map_err(map_sqlx_error)?;
+
+        Ok(genders)
     }
 
     async fn retrieve_mime_type(
@@ -265,7 +321,7 @@ mod postgres {
         parent_id: Option<Uuid>,
         row: &PgRow,
     ) -> Result<Recording, sqlx::Error> {
-        use crate::recording::{ActiveRecording, Label};
+        use crate::recording::ActiveRecording;
 
         let make_optional_label =
             |id_column: &str, label_column: &str| -> Result<Option<Label>, sqlx::Error> {

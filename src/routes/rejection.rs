@@ -40,16 +40,27 @@ impl From<Rejection> for reject::Rejection {
 #[derive(Clone, Debug, Serialize)]
 #[serde(untagged)]
 pub enum Context {
+    Ages,
+    Categories,
     Children { parent: String },
     Count,
     Delete { id: String },
     Formats,
+    Genders,
     Hide { id: String },
     Retrieve { id: String },
     Upload { id: Option<String> },
 }
 
 impl Context {
+    pub fn ages() -> Context {
+        Context::Ages
+    }
+
+    pub fn categories() -> Context {
+        Context::Categories
+    }
+
     pub fn children(parent: String) -> Context {
         Context::Children { parent }
     }
@@ -64,6 +75,10 @@ impl Context {
 
     pub fn formats() -> Context {
         Context::Formats
+    }
+
+    pub fn genders() -> Context {
+        Context::Genders
     }
 
     pub fn hide(id: String) -> Context {

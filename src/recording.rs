@@ -3,6 +3,7 @@ use time::OffsetDateTime;
 use url::Url;
 use uuid::Uuid;
 
+use crate::label::{Id, Label};
 use crate::normalization;
 
 #[derive(Clone, Debug, Serialize)]
@@ -203,17 +204,3 @@ pub struct Times {
     #[serde(with = "time::serde::timestamp")]
     pub(crate) updated_at: OffsetDateTime,
 }
-
-/// A label for a choice. The meaning is derived from configuration at
-/// runtime.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct Label(Id, String);
-
-impl Label {
-    pub fn new(id: Id, label: String) -> Self {
-        Label(id, label)
-    }
-}
-
-/// An ID in the database.
-pub type Id = i16;
