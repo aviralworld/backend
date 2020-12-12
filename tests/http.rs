@@ -616,7 +616,7 @@ fn upload_file(
 
 fn make_wrapper_for_test(
     logger: Arc<Logger>,
-) -> impl Fn(&[u8]) -> Result<AudioFormat, errors::BackendError> {
+) -> impl Fn(&[u8]) -> Result<Vec<AudioFormat>, errors::BackendError> {
     use backend::audio;
 
     audio::make_wrapper(

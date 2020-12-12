@@ -424,9 +424,11 @@ async fn verify_audio(
         .await
         .map_err(|_| BackendError::MalformedFormSubmission)?;
 
-    let format = checker(&audio_data)?;
+    // always use the first format
+    let formats = checker(&audio_data)?;
+    let format = formats.get(0).ok_or_else(|| BackendError::UnrecognizedAudioFormat)?;
 
-    Ok((audio_data, format))
+    Ok((audio_data, format.clone()))
 }
 
 async fn save_recording_metadata(

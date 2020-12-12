@@ -88,4 +88,9 @@ pub enum BackendError {
     /// container & codec combination in the database.
     #[error("invalid audio format: {}/{}", format.container, format.codec)]
     InvalidAudioFormat { format: format::AudioFormat },
+
+    /// Represents an error caused by not being able to recognize any
+    /// audio format.
+    #[error("unknown audio format")]
+    UnrecognizedAudioFormat,
 }
