@@ -104,7 +104,10 @@ mod inner {
 
             let stream = streams.first().unwrap();
             let codec = &stream.codec_name;
-            let format = &parsed.format.format_name;
+
+            // ffprobe sometimes returns multiple container formats, so
+            // we just take the first one
+            let format = &parsed.format.format_name.split(',').next().unwrap().to_string();
 
             Ok(AudioFormat::new(format.to_owned(), codec.to_owned()))
         }
