@@ -39,8 +39,9 @@ INSERT INTO genders (id, label, enabled) VALUES (3, 'No gender specified', TRUE)
 INSERT INTO genders (id, label, enabled) VALUES (50, 'None of the above', TRUE);
 INSERT INTO genders (id, label, enabled) VALUES (5, 'This is a bogus gender', FALSE);
 
-INSERT INTO mime_types (essence, container, codec, extension) VALUES ('audio/ogg; codec=opus', 'ogg', 'opus', 'ogg');
-INSERT INTO mime_types (essence, container, codec, extension) VALUES ('audio/ogg', 'ogg', 'vorbis', 'ogg');
+INSERT INTO mime_types (id, essence) VALUES (1, 'audio/ogg; codec=opus'), (2, 'audio/ogg');
+
+INSERT INTO audio_formats (container, codec, extension, mime_type_id) VALUES ('ogg', 'opus', 'ogg', 1), ('ogg', 'vorbis', 'ogg', 2);
 
 --
 -- TOC entry 2980 (class 0 OID 0)
