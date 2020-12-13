@@ -21,7 +21,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let store = Arc::new(S3Store::from_env().expect("initialize S3 store from environment"));
 
     let logger = initialize_logger();
-    info!(logger, "Starting...");
+    let build_timestamp = env::var("BUILD_TIMESTAMP");
+    let revision = env::var("BACKEND_REVISION");
+
+    let version = match (build_timestamp, revision) {
+        (Ok(bt), Ok(r)) => &format!(" (r{} built at {})", bt, r),
+        _ => "",
+    };
+
+    info!(logger, "Starting{}...", version);
     let logger = Arc::new(logger);
 
     let ffprobe_path = get_ffprobe(env::var("BACKEND_FFPROBE_PATH").ok());
