@@ -25,8 +25,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let revision = env::var("BACKEND_REVISION");
 
     let version = match (build_timestamp, revision) {
-        (Ok(bt), Ok(r)) => &format!(" (r{} built at {})", bt, r),
-        _ => "",
+        (Ok(bt), Ok(r)) => format!(" (r{} built at {})", bt, r),
+        _ => "".to_owned(),
     };
 
     info!(logger, "Starting{}...", version);
@@ -88,10 +88,8 @@ fn initialize_logger() -> slog::Logger {
     #[cfg(feature = "enable_warp_logging")]
     pretty_env_logger::init();
 
-    let logger = Logger::root(
+    Logger::root(
         drain,
         o!("version" => env!("CARGO_PKG_VERSION"), "revision" => option_env!("BACKEND_REVISION")),
-    );
-
-    logger
+    )
 }

@@ -238,7 +238,9 @@ async fn get_categories<O: Clone + Send + Sync>(
         .db
         .retrieve_categories()
         .await
-        .map_err(|e: BackendError| rejection::Rejection::new(rejection::Context::categories(), e))?;
+        .map_err(|e: BackendError| {
+            rejection::Rejection::new(rejection::Context::categories(), e)
+        })?;
 
     Ok(json(&categories))
 }
@@ -426,7 +428,9 @@ async fn verify_audio(
 
     // always use the first format
     let formats = checker(&audio_data)?;
-    let format = formats.get(0).ok_or_else(|| BackendError::UnrecognizedAudioFormat)?;
+    let format = formats
+        .get(0)
+        .ok_or(BackendError::UnrecognizedAudioFormat)?;
 
     Ok((audio_data, format.clone()))
 }

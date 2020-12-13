@@ -73,7 +73,11 @@ mod inner {
     impl Checker {}
 
     impl super::CodecChecker for Checker {
-        fn identify(&self, _logger: Arc<Logger>, data: &[u8]) -> Result<Vec<AudioFormat>, BackendError> {
+        fn identify(
+            &self,
+            _logger: Arc<Logger>,
+            data: &[u8],
+        ) -> Result<Vec<AudioFormat>, BackendError> {
             use std::io::Write;
             use std::process::Command;
 
@@ -109,7 +113,9 @@ mod inner {
             // we just take the first one
             let formats = parsed.format.format_name.split(',');
 
-            Ok(formats.map(|format| AudioFormat::new(format.to_owned(), codec.to_owned())).collect::<Vec<_>>())
+            Ok(formats
+                .map(|format| AudioFormat::new(format.to_owned(), codec.to_owned()))
+                .collect::<Vec<_>>())
         }
 
         fn new(path: Option<impl AsRef<Path>>) -> Self {

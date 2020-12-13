@@ -2,9 +2,9 @@ use futures::future::BoxFuture;
 use url::Url;
 use uuid::Uuid;
 
-use crate::{audio::format::AudioFormat, errors::BackendError, mime_type::MimeType};
 use crate::label::Label;
 use crate::recording::{ChildRecording, NewRecording, Recording, UploadMetadata};
+use crate::{audio::format::AudioFormat, errors::BackendError, mime_type::MimeType};
 
 pub trait Db {
     fn children(&self, id: &Uuid) -> BoxFuture<Result<Vec<ChildRecording>, BackendError>>;
@@ -52,9 +52,9 @@ mod postgres {
     use url::Url;
     use uuid::Uuid;
 
-    use crate::{audio::format::AudioFormat, errors::BackendError, mime_type::MimeType};
     use crate::label::{Id, Label};
     use crate::recording::{ChildRecording, NewRecording, Recording, Times, UploadMetadata};
+    use crate::{audio::format::AudioFormat, errors::BackendError, mime_type::MimeType};
 
     static DEFAULT_URL: Option<String> = None;
 

@@ -632,10 +632,7 @@ fn verify_recording_data(recording: &RetrievalResponse, id: &str, parent_id: &st
     assert_eq!(recording.mime_type.1, "audio/ogg; codec=opus");
 
     // serde has already verified that the times are i64s, i.e. valid as Unix timestamps
-    assert_eq!(
-        recording.category,
-        RelatedLabel(1, "یہ بھی ہے".to_owned())
-    );
+    assert_eq!(recording.category, RelatedLabel(1, "یہ بھی ہے".to_owned()));
     assert_eq!(recording.parent, Some(parent_id.to_owned()));
     assert_eq!(recording.name, "Another \r\nname");
     assert_eq!(recording.age, None);
