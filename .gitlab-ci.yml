@@ -1,6 +1,8 @@
 variables:
   CARGO_INCREMENTAL: 0
   RUST_VERSION: 1.46.0
+  FFMPEG_URL: "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz"
+  FFMPEG_FILENAME: "ffmpeg-release-amd64-static.tar.xz"
 
 stages:
   - check
@@ -102,6 +104,18 @@ docker:
   image:
     name: gcr.io/kaniko-project/executor:debug
     entrypoint: [""]
+  cache:
+    paths:
+      - ffmpeg
+    key:
+      prefix: "docker-"
+      files:
+        - ffmpeg
+        - ffprobe
+  before_script:
+    - mkdir -p ffmpeg && cd ffmpeg
+    - wget -N $FFMPEG_URL
+    - tar xJf --strip=1 $FFMPEG_FILENAME
   script:
     - echo $KANIKO_AUTH_CONFIG > /kaniko/.docker/config.json
     - export build_timestamp=`date +%Y%m%d%H%M%S`

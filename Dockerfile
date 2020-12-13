@@ -19,7 +19,7 @@ COPY src ./src
 RUN OPENSSL_LIB_DIR=/usr/local/musl/lib/ OPENSSL_INCLUDE_DIR=/usr/local/musl/include OPENSSL_STATIC=1 cargo build --target x86_64-unknown-linux-musl --release --frozen --offline
 
 FROM scratch
-# TODO add ffmpeg
+COPY ffmpeg/ffprobe /bin/ffprobe
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 ENV SSL_CERT_DIR=/etc/ssl/certs/
 COPY --from=builder /home/rust/src/backend/target/x86_64-unknown-linux-musl/release/backend /usr/app/backend
