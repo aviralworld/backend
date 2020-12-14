@@ -4,6 +4,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::sync::Once;
 
+use lazy_static::lazy_static;
 use once_cell::sync::OnceCell;
 use serde::Deserialize;
 use slog::{self, o, Logger};
@@ -37,43 +38,6 @@ struct RetrievalResponse {
     created_at: i64,
     updated_at: i64,
     category: RelatedLabel,
-    unlisted: bool,
-    parent: Option<String>,
-    name: String,
-    age: Option<RelatedLabel>,
-    gender: Option<RelatedLabel>,
-    location: Option<String>,
-    occupation: Option<String>,
-}
-
-impl RetrievalResponse {
-    fn into_comparable(self) -> ComparableRetrievalResponse {
-        ComparableRetrievalResponse {
-            id: self.id,
-            url: self.url,
-            mime_type: self.mime_type,
-            created_at: self.created_at,
-            category: self.category,
-            unlisted: self.unlisted,
-            parent: self.parent,
-            name: self.name,
-            age: self.age,
-            gender: self.gender,
-            location: self.location,
-            occupation: self.occupation,
-        }
-    }
-}
-
-// this is RetrievalResponse minus updated_at
-#[derive(Debug, PartialEq)]
-struct ComparableRetrievalResponse {
-    id: String,
-    url: String,
-    mime_type: RelatedLabel,
-    created_at: i64,
-    category: RelatedLabel,
-    unlisted: bool,
     parent: Option<String>,
     name: String,
     age: Option<RelatedLabel>,
@@ -84,7 +48,7 @@ struct ComparableRetrievalResponse {
 
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
-struct RelatedLabel(i8, String);
+struct RelatedLabel(i16, String);
 
 static SLOG_SCOPE_GUARD: OnceCell<slog_scope::GlobalLoggerGuard> = OnceCell::new();
 
@@ -93,6 +57,9 @@ const BOUNDARY: &str = "thisisaboundary1234";
 #[tokio::test]
 async fn api_works() {
     test_formats().await;
+    test_ages().await;
+    test_categories().await;
+    test_genders().await;
 
     test_non_existent_recording().await;
 
@@ -113,12 +80,10 @@ async fn api_works() {
 
     let ids = test_uploading_children(&file_path, &content_type, &id, children).await;
 
-    let id_to_delete = ids.get(1).expect("get second child ID");
+    let id_to_delete = ids.get(2).expect("get third child ID");
     test_deletion(id_to_delete, &id, &ids).await;
 
     test_count().await;
-
-    test_updating(ids.iter().last().expect("get last child ID")).await;
 }
 
 async fn test_formats() {
@@ -134,6 +99,98 @@ async fn test_formats() {
         serde_json::from_str::<Vec<String>>(&body).expect("parse response as Vec<String>");
 
     assert_eq!(formats, vec!["audio/ogg; codec=opus", "audio/ogg"]);
+}
+
+async fn test_ages() {
+    lazy_static! {
+        static ref AGES: Vec<RelatedLabel> = {
+            vec![
+                RelatedLabel(1, String::from("Age 1")),
+                RelatedLabel(2, String::from("Age B")),
+                RelatedLabel(3, String::from("Age three")),
+                RelatedLabel(4, String::from("Fooled ya! This is Age 2")),
+            ]
+        };
+    }
+
+    let response = warp::test::request()
+        .path("/recs/ages")
+        .method("GET")
+        .reply(&make_ages_list_filter("test_ages").await)
+        .await;
+
+    assert_eq!(response.status(), 200);
+
+    let body = String::from_utf8_lossy(response.body()).into_owned();
+
+    let ages = serde_json::from_str::<Vec<RelatedLabel>>(&body)
+        .expect("parse response as Vec<RelatedLabel>");
+
+    assert_eq!(ages, *AGES);
+}
+
+async fn test_categories() {
+    lazy_static! {
+        static ref CATEGORIES: Vec<RelatedLabel> = {
+            vec![
+                RelatedLabel(6, String::from("This is a category")),
+                RelatedLabel(2, String::from("Some other category")),
+                RelatedLabel(
+                    7,
+                    "This category has
+  some newlines
+and spaces in it"
+                        .to_owned(),
+                ),
+                RelatedLabel(3, String::from("यह हिन्दी है ।")),
+                RelatedLabel(4, String::from("Ceci n’est pas une catégorie")),
+                RelatedLabel(1, String::from("یہ بھی ہے")),
+            ]
+        };
+    }
+
+    let response = warp::test::request()
+        .path("/recs/categories")
+        .method("GET")
+        .reply(&make_categories_list_filter("test_categories").await)
+        .await;
+
+    assert_eq!(response.status(), 200);
+
+    let body = String::from_utf8_lossy(response.body()).into_owned();
+
+    let categories = serde_json::from_str::<Vec<RelatedLabel>>(&body)
+        .expect("parse response as Vec<RelatedLabel>");
+
+    assert_eq!(categories, *CATEGORIES);
+}
+
+async fn test_genders() {
+    lazy_static! {
+        static ref GENDERS: Vec<RelatedLabel> = {
+            vec![
+                RelatedLabel(1, String::from("One of the genders")),
+                RelatedLabel(2, String::from("Some other genders")),
+                RelatedLabel(3, String::from("No gender specified")),
+                RelatedLabel(50, String::from("None of the above")),
+            ]
+        };
+    }
+
+    let response = warp::test::request()
+        .path("/recs/genders")
+        .method("GET")
+        .reply(&make_genders_list_filter("test_genders").await)
+        .await;
+
+    assert_eq!(response.status(), 200);
+
+    let body = String::from_utf8_lossy(response.body()).into_owned();
+
+    let genders = serde_json::from_str::<Vec<RelatedLabel>>(&body)
+        .expect("parse response as Vec<RelatedLabel>");
+
+    assert_eq!(genders, *GENDERS);
 }
 
 async fn test_upload(file_path: impl AsRef<Path>, content_type: impl AsRef<str>) -> String {
@@ -261,7 +318,6 @@ async fn test_uploading_child(
 ) -> Option<String> {
     let filter = make_upload_filter("test_uploading_child").await;
     let object = child.as_object_mut().expect("get child as object");
-    let unlisted = object["unlisted"].as_bool().unwrap_or(false);
     object.insert("parent_id".to_owned(), serde_json::json!(id));
     let bytes = serde_json::to_vec(&object).expect("serialize edited child as JSON");
 
@@ -282,11 +338,7 @@ async fn test_uploading_child(
         .id
         .unwrap();
 
-    if unlisted {
-        None
-    } else {
-        Some(id)
-    }
+    Some(id)
 }
 
 async fn test_deletion(id_to_delete: &str, parent: &str, ids: &[String]) {
@@ -368,39 +420,6 @@ async fn test_count() {
         .expect("parse count response as i64");
 
     assert_eq!(count, 4);
-}
-
-async fn test_updating(id: &str) {
-    // can be simplified once async closures are stabilized (rust-lang/rust#62290)
-    async fn retrieve(id: &str) -> RetrievalResponse {
-        let retrieve_filter = make_retrieve_filter("test_updating").await;
-        let response = warp::test::request()
-            .path(&format!("/recs/id/{id}/", id = id))
-            .method("GET")
-            .reply(&retrieve_filter)
-            .await;
-
-        serde_json::from_slice(response.body()).expect("deserialize retrieved recording")
-    }
-
-    let before = retrieve(id).await.into_comparable();
-
-    let response = warp::test::request()
-        .path(&format!("/recs/id/{id}/hide/", id = id))
-        .method("POST")
-        .reply(&make_hide_filter("uploading works").await)
-        .await;
-    assert_eq!(response.status(), StatusCode::NO_CONTENT);
-
-    let after = retrieve(id).await.into_comparable();
-
-    assert_eq!(
-        after,
-        ComparableRetrievalResponse {
-            unlisted: true,
-            ..before
-        }
-    );
 }
 
 #[tokio::test]
@@ -494,12 +513,28 @@ async fn make_count_filter<'a>(
     routes::make_count_route(environment)
 }
 
-async fn make_hide_filter<'a>(
+async fn make_ages_list_filter<'a>(
     test_name: impl Into<String>,
 ) -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::reject::Rejection> + 'a {
     let environment = make_environment(test_name.into()).await;
 
-    routes::make_hide_route(environment)
+    routes::make_ages_list_route(environment)
+}
+
+async fn make_categories_list_filter<'a>(
+    test_name: impl Into<String>,
+) -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::reject::Rejection> + 'a {
+    let environment = make_environment(test_name.into()).await;
+
+    routes::make_categories_list_route(environment)
+}
+
+async fn make_genders_list_filter<'a>(
+    test_name: impl Into<String>,
+) -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::reject::Rejection> + 'a {
+    let environment = make_environment(test_name.into()).await;
+
+    routes::make_genders_list_route(environment)
 }
 
 fn parse_children_ids(body: &[u8]) -> Vec<String> {
@@ -581,7 +616,7 @@ fn upload_file(
 
 fn make_wrapper_for_test(
     logger: Arc<Logger>,
-) -> impl Fn(&[u8]) -> Result<AudioFormat, errors::BackendError> {
+) -> impl Fn(&[u8]) -> Result<Vec<AudioFormat>, errors::BackendError> {
     use backend::audio;
 
     audio::make_wrapper(
@@ -597,11 +632,7 @@ fn verify_recording_data(recording: &RetrievalResponse, id: &str, parent_id: &st
     assert_eq!(recording.mime_type.1, "audio/ogg; codec=opus");
 
     // serde has already verified that the times are i64s, i.e. valid as Unix timestamps
-    assert_eq!(
-        recording.category,
-        RelatedLabel(1, "This is a category".to_owned())
-    );
-    assert_eq!(recording.unlisted, false);
+    assert_eq!(recording.category, RelatedLabel(1, "یہ بھی ہے".to_owned()));
     assert_eq!(recording.parent, Some(parent_id.to_owned()));
     assert_eq!(recording.name, "Another \r\nname");
     assert_eq!(recording.age, None);

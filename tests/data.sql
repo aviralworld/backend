@@ -17,27 +17,31 @@ TRUNCATE categories CASCADE;
 TRUNCATE genders CASCADE;
 TRUNCATE mime_types CASCADE;
 
-INSERT INTO ages (id, label) VALUES (1, 'Age 1');
-INSERT INTO ages (id, label) VALUES (2, 'Age B');
-INSERT INTO ages (id, label) VALUES (3, 'Age three');
-INSERT INTO ages (id, label) VALUES (4, 'Fooled ya! This is Age 2');
+INSERT INTO ages (id, label, enabled) VALUES (1, 'Age 1', TRUE);
+INSERT INTO ages (id, label, enabled) VALUES (2, 'Age B', TRUE);
+INSERT INTO ages (id, label, enabled) VALUES (3, 'Age three', TRUE);
+INSERT INTO ages (id, label, enabled) VALUES (4, 'Fooled ya! This is Age 2', TRUE);
+INSERT INTO ages (id, label, enabled) VALUES (20, 'This age doesn''t exist', FALSE);
 
-INSERT INTO categories (id, label) VALUES (1, 'This is a category');
-INSERT INTO categories (id, label) VALUES (2, 'Some other category');
-INSERT INTO categories (id, label) VALUES (3, 'This category has
+INSERT INTO categories (id, label, enabled) VALUES (6, 'This is a category', TRUE);
+INSERT INTO categories (id, label, enabled) VALUES (2, 'Some other category', TRUE);
+INSERT INTO categories (id, label, enabled) VALUES (5, 'This one is disabled', FALSE);
+INSERT INTO categories (id, label, enabled) VALUES (7, 'This category has
   some newlines
-and spaces in it');
-INSERT INTO categories (id, label) VALUES (4, 'यह हिन्दी है ।');
-INSERT INTO categories (id, label) VALUES (5, 'Ceci n’est pas une catégorie');
-INSERT INTO categories (id, label) VALUES (6, 'یہ بھی ہے');
+and spaces in it', TRUE);
+INSERT INTO categories (id, label, enabled) VALUES (3, 'यह हिन्दी है ।', TRUE);
+INSERT INTO categories (id, label, enabled) VALUES (4, 'Ceci n’est pas une catégorie', TRUE);
+INSERT INTO categories (id, label, enabled) VALUES (1, 'یہ بھی ہے', TRUE);
 
-INSERT INTO genders (id, label) VALUES (1, 'One of the genders');
-INSERT INTO genders (id, label) VALUES (2, 'Some other genders');
-INSERT INTO genders (id, label) VALUES (3, 'No gender specified');
-INSERT INTO genders (id, label) VALUES (4, 'None of the above');
+INSERT INTO genders (id, label, enabled) VALUES (1, 'One of the genders', TRUE);
+INSERT INTO genders (id, label, enabled) VALUES (2, 'Some other genders', TRUE);
+INSERT INTO genders (id, label, enabled) VALUES (3, 'No gender specified', TRUE);
+INSERT INTO genders (id, label, enabled) VALUES (50, 'None of the above', TRUE);
+INSERT INTO genders (id, label, enabled) VALUES (5, 'This is a bogus gender', FALSE);
 
-INSERT INTO mime_types (essence, container, codec, extension) VALUES ('audio/ogg; codec=opus', 'ogg', 'opus', 'ogg');
-INSERT INTO mime_types (essence, container, codec, extension) VALUES ('audio/ogg', 'ogg', 'vorbis', 'ogg');
+INSERT INTO mime_types (id, essence) VALUES (1, 'audio/ogg; codec=opus'), (2, 'audio/ogg');
+
+INSERT INTO audio_formats (container, codec, extension, mime_type_id) VALUES ('ogg', 'opus', 'ogg', 1), ('ogg', 'vorbis', 'ogg', 2);
 
 --
 -- TOC entry 2980 (class 0 OID 0)
@@ -45,7 +49,7 @@ INSERT INTO mime_types (essence, container, codec, extension) VALUES ('audio/ogg
 -- Name: ages_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
 --
 
-SELECT pg_catalog.setval('ages_id_seq', 4, true);
+SELECT pg_catalog.setval('ages_id_seq', 4, TRUE);
 
 
 --
@@ -54,7 +58,7 @@ SELECT pg_catalog.setval('ages_id_seq', 4, true);
 -- Name: categories_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
 --
 
-SELECT pg_catalog.setval('categories_id_seq', 6, true);
+SELECT pg_catalog.setval('categories_id_seq', 6, TRUE);
 
 
 --
@@ -63,7 +67,7 @@ SELECT pg_catalog.setval('categories_id_seq', 6, true);
 -- Name: genders_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
 --
 
-SELECT pg_catalog.setval('genders_id_seq', 4, true);
+SELECT pg_catalog.setval('genders_id_seq', 4, TRUE);
 
 
 --
@@ -72,4 +76,4 @@ SELECT pg_catalog.setval('genders_id_seq', 4, true);
 -- Name: movine_migrations_id_seq; Type: SEQUENCE SET; Schema: public; Owner: postgres
 --
 
-SELECT pg_catalog.setval('movine_migrations_id_seq', 2, true);
+SELECT pg_catalog.setval('movine_migrations_id_seq', 2, TRUE);

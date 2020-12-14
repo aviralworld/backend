@@ -46,12 +46,64 @@ pub fn make_formats_route<'a, O: Clone + Send + Sync + 'a>(
     let recordings_path = environment.urls.recordings_path.clone();
     let logger = environment.logger.clone();
 
+    // TODO make this cacheable
     warp::path(recordings_path)
         .and(warp::path("formats"))
         .and(warp::path::end())
         .and(warp::get())
         .and_then(move || -> BoxFuture<Result<Json, reject::Rejection>> {
             get_formats(environment.clone()).boxed()
+        })
+        .recover(move |r| format_rejection(logger.clone(), r))
+}
+
+pub fn make_ages_list_route<'a, O: Clone + Send + Sync + 'a>(
+    environment: Environment<O>,
+) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
+    let recordings_path = environment.urls.recordings_path.clone();
+    let logger = environment.logger.clone();
+
+    // TODO make this cacheable
+    warp::path(recordings_path)
+        .and(warp::path("ages"))
+        .and(warp::path::end())
+        .and(warp::get())
+        .and_then(move || -> BoxFuture<Result<Json, reject::Rejection>> {
+            get_ages(environment.clone()).boxed()
+        })
+        .recover(move |r| format_rejection(logger.clone(), r))
+}
+
+pub fn make_categories_list_route<'a, O: Clone + Send + Sync + 'a>(
+    environment: Environment<O>,
+) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
+    let recordings_path = environment.urls.recordings_path.clone();
+    let logger = environment.logger.clone();
+
+    // TODO make this cacheable
+    warp::path(recordings_path)
+        .and(warp::path("categories"))
+        .and(warp::path::end())
+        .and(warp::get())
+        .and_then(move || -> BoxFuture<Result<Json, reject::Rejection>> {
+            get_categories(environment.clone()).boxed()
+        })
+        .recover(move |r| format_rejection(logger.clone(), r))
+}
+
+pub fn make_genders_list_route<'a, O: Clone + Send + Sync + 'a>(
+    environment: Environment<O>,
+) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
+    let recordings_path = environment.urls.recordings_path.clone();
+    let logger = environment.logger.clone();
+
+    // TODO make this cacheable
+    warp::path(recordings_path)
+        .and(warp::path("genders"))
+        .and(warp::path::end())
+        .and(warp::get())
+        .and_then(move || -> BoxFuture<Result<Json, reject::Rejection>> {
+            get_genders(environment.clone()).boxed()
         })
         .recover(move |r| format_rejection(logger.clone(), r))
 }
@@ -155,27 +207,6 @@ pub fn make_retrieve_route<'a, O: Clone + Send + Sync + 'a>(
         .recover(move |r| format_rejection(logger.clone(), r))
 }
 
-pub fn make_hide_route<'a, O: Clone + Send + Sync + 'a>(
-    environment: Environment<O>,
-) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
-    let logger = environment.logger.clone();
-
-    let recordings_path = environment.urls.recordings_path.clone();
-
-    warp::path(recordings_path)
-        .and(warp::path("id"))
-        .and(warp::path::param::<String>())
-        .and(warp::path("hide"))
-        .and(warp::path::end())
-        .and(warp::post())
-        .and_then(
-            move |id| -> BoxFuture<Result<StatusCode, reject::Rejection>> {
-                hide_recording(environment.clone(), id).boxed()
-            },
-        )
-        .recover(move |r| format_rejection(logger.clone(), r))
-}
-
 async fn get_formats<O: Clone + Send + Sync>(
     environment: Environment<O>,
 ) -> Result<Json, reject::Rejection> {
@@ -186,6 +217,44 @@ async fn get_formats<O: Clone + Send + Sync>(
         .map_err(|e: BackendError| rejection::Rejection::new(rejection::Context::formats(), e))?;
 
     Ok(json(&formats))
+}
+
+async fn get_ages<O: Clone + Send + Sync>(
+    environment: Environment<O>,
+) -> Result<Json, reject::Rejection> {
+    let ages = environment
+        .db
+        .retrieve_ages()
+        .await
+        .map_err(|e: BackendError| rejection::Rejection::new(rejection::Context::ages(), e))?;
+
+    Ok(json(&ages))
+}
+
+async fn get_categories<O: Clone + Send + Sync>(
+    environment: Environment<O>,
+) -> Result<Json, reject::Rejection> {
+    let categories = environment
+        .db
+        .retrieve_categories()
+        .await
+        .map_err(|e: BackendError| {
+            rejection::Rejection::new(rejection::Context::categories(), e)
+        })?;
+
+    Ok(json(&categories))
+}
+
+async fn get_genders<O: Clone + Send + Sync>(
+    environment: Environment<O>,
+) -> Result<Json, reject::Rejection> {
+    let genders = environment
+        .db
+        .retrieve_genders()
+        .await
+        .map_err(|e: BackendError| rejection::Rejection::new(rejection::Context::genders(), e))?;
+
+    Ok(json(&genders))
 }
 
 async fn get_recording_count<O: Clone + Send + Sync>(
@@ -346,23 +415,6 @@ async fn retrieve_recording<O: Clone + Send + Sync>(
     }
 }
 
-async fn hide_recording<O: Clone + Send + Sync>(
-    environment: Environment<O>,
-    id: String,
-) -> Result<StatusCode, reject::Rejection> {
-    let error_handler =
-        |e: BackendError| rejection::Rejection::new(rejection::Context::hide(id.clone()), e);
-
-    let id = Uuid::parse_str(&id)
-        .map_err(|_| BackendError::InvalidId(id.clone()))
-        .map_err(error_handler)?;
-    debug!(environment.logger, "Hiding recording..."; "id" => format!("{}", &id));
-
-    environment.db.hide(&id).await.map_err(error_handler)?;
-
-    Ok(StatusCode::NO_CONTENT)
-}
-
 async fn verify_audio(
     _logger: Arc<Logger>,
     checker: Arc<environment::Checker>,
@@ -374,9 +426,13 @@ async fn verify_audio(
         .await
         .map_err(|_| BackendError::MalformedFormSubmission)?;
 
-    let format = checker(&audio_data)?;
+    // always use the first format
+    let formats = checker(&audio_data)?;
+    let format = formats
+        .get(0)
+        .ok_or(BackendError::UnrecognizedAudioFormat)?;
 
-    Ok((audio_data, format))
+    Ok((audio_data, format.clone()))
 }
 
 async fn save_recording_metadata(

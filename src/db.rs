@@ -2,6 +2,7 @@ use futures::future::BoxFuture;
 use url::Url;
 use uuid::Uuid;
 
+use crate::label::Label;
 use crate::recording::{ChildRecording, NewRecording, Recording, UploadMetadata};
 use crate::{audio::format::AudioFormat, errors::BackendError, mime_type::MimeType};
 
@@ -12,13 +13,17 @@ pub trait Db {
 
     fn delete(&self, id: &Uuid) -> BoxFuture<Result<(), BackendError>>;
 
-    fn hide(&self, id: &Uuid) -> BoxFuture<Result<(), BackendError>>;
-
     fn insert(&self, metadata: UploadMetadata) -> BoxFuture<Result<NewRecording, BackendError>>;
 
     fn retrieve(&self, id: &Uuid) -> BoxFuture<Result<Option<Recording>, BackendError>>;
 
+    fn retrieve_ages(&self) -> BoxFuture<Result<Vec<Label>, BackendError>>;
+
+    fn retrieve_categories(&self) -> BoxFuture<Result<Vec<Label>, BackendError>>;
+
     fn retrieve_format_essences(&self) -> BoxFuture<Result<Vec<String>, BackendError>>;
+
+    fn retrieve_genders(&self) -> BoxFuture<Result<Vec<Label>, BackendError>>;
 
     fn retrieve_mime_type(
         &self,
@@ -47,7 +52,8 @@ mod postgres {
     use url::Url;
     use uuid::Uuid;
 
-    use crate::recording::{ChildRecording, Id, NewRecording, Recording, Times, UploadMetadata};
+    use crate::label::{Id, Label};
+    use crate::recording::{ChildRecording, NewRecording, Recording, Times, UploadMetadata};
     use crate::{audio::format::AudioFormat, errors::BackendError, mime_type::MimeType};
 
     static DEFAULT_URL: Option<String> = None;
@@ -79,10 +85,6 @@ mod postgres {
             delete(*id, &self.pool).boxed()
         }
 
-        fn hide(&self, id: &Uuid) -> BoxFuture<Result<(), BackendError>> {
-            hide(*id, &self.pool).boxed()
-        }
-
         fn insert(
             &self,
             metadata: UploadMetadata,
@@ -94,8 +96,20 @@ mod postgres {
             retrieve(*id, &self.pool).boxed()
         }
 
+        fn retrieve_ages(&self) -> BoxFuture<Result<Vec<Label>, BackendError>> {
+            retrieve_ages(&self.pool).boxed()
+        }
+
+        fn retrieve_categories(&self) -> BoxFuture<Result<Vec<Label>, BackendError>> {
+            retrieve_categories(&self.pool).boxed()
+        }
+
         fn retrieve_format_essences(&self) -> BoxFuture<Result<Vec<String>, BackendError>> {
             retrieve_format_essences(&self.pool).boxed()
+        }
+
+        fn retrieve_genders(&self) -> BoxFuture<Result<Vec<Label>, BackendError>> {
+            retrieve_genders(&self.pool).boxed()
         }
 
         fn retrieve_mime_type(
@@ -152,19 +166,6 @@ mod postgres {
         }
     }
 
-    async fn hide(id: Uuid, pool: &PgPool) -> Result<(), BackendError> {
-        let query = sqlx::query(include_str!("queries/update_privacy.sql"));
-
-        let _ = query
-            .bind(id)
-            .bind(true)
-            .execute(pool)
-            .await
-            .map_err(map_sqlx_error)?;
-
-        Ok(())
-    }
-
     async fn insert(metadata: UploadMetadata, pool: &PgPool) -> Result<NewRecording, BackendError> {
         use sqlx::prelude::*;
 
@@ -176,7 +177,6 @@ mod postgres {
             .bind(None::<Option<i16>>)
             .bind(&metadata.category_id)
             .bind(&metadata.parent_id)
-            .bind(&metadata.unlisted)
             .bind(&metadata.name)
             .bind(&metadata.location)
             .bind(&metadata.occupation)
@@ -218,6 +218,30 @@ mod postgres {
         Ok(recording)
     }
 
+    async fn retrieve_ages(pool: &PgPool) -> Result<Vec<Label>, BackendError> {
+        let query = sqlx::query(include_str!("queries/retrieve_ages.sql"));
+
+        let ages: Vec<Label> = query
+            .try_map(|row: PgRow| Ok(Label::new(try_get(&row, "id")?, try_get(&row, "label")?)))
+            .fetch_all(pool)
+            .await
+            .map_err(map_sqlx_error)?;
+
+        Ok(ages)
+    }
+
+    async fn retrieve_categories(pool: &PgPool) -> Result<Vec<Label>, BackendError> {
+        let query = sqlx::query(include_str!("queries/retrieve_categories.sql"));
+
+        let categories: Vec<Label> = query
+            .try_map(|row: PgRow| Ok(Label::new(try_get(&row, "id")?, try_get(&row, "label")?)))
+            .fetch_all(pool)
+            .await
+            .map_err(map_sqlx_error)?;
+
+        Ok(categories)
+    }
+
     async fn retrieve_format_essences(pool: &PgPool) -> Result<Vec<String>, BackendError> {
         let query = sqlx::query(include_str!("queries/retrieve_format_essences.sql"));
 
@@ -228,6 +252,18 @@ mod postgres {
             .map_err(map_sqlx_error)?;
 
         Ok(essences)
+    }
+
+    async fn retrieve_genders(pool: &PgPool) -> Result<Vec<Label>, BackendError> {
+        let query = sqlx::query(include_str!("queries/retrieve_genders.sql"));
+
+        let genders: Vec<Label> = query
+            .try_map(|row: PgRow| Ok(Label::new(try_get(&row, "id")?, try_get(&row, "label")?)))
+            .fetch_all(pool)
+            .await
+            .map_err(map_sqlx_error)?;
+
+        Ok(genders)
     }
 
     async fn retrieve_mime_type(
@@ -285,7 +321,7 @@ mod postgres {
         parent_id: Option<Uuid>,
         row: &PgRow,
     ) -> Result<Recording, sqlx::Error> {
-        use crate::recording::{ActiveRecording, Label};
+        use crate::recording::ActiveRecording;
 
         let make_optional_label =
             |id_column: &str, label_column: &str| -> Result<Option<Label>, sqlx::Error> {
@@ -299,7 +335,6 @@ mod postgres {
             };
 
         let name: String = try_get(&row, "name")?;
-        let unlisted: bool = try_get(&row, "unlisted")?;
         let url: String = try_get(&row, "url")?;
         let url: Url = Url::parse(&url).map_err(|source| {
             // this should never happen, since we control the URLs
@@ -316,8 +351,7 @@ mod postgres {
         let occupation: Option<String> = try_get(&row, "occupation")?;
 
         Ok(Recording::Active(ActiveRecording::new(
-            id, times, name, parent_id, url, mime_type, category, gender, age, location,
-            occupation, unlisted,
+            id, times, name, parent_id, url, mime_type, category, gender, age, location, occupation,
         )))
     }
 

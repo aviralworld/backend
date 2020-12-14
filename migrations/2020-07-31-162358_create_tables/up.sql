@@ -3,18 +3,21 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE TABLE IF NOT EXISTS "ages" (
     id smallserial,
     label character varying(50) NOT NULL UNIQUE,
+    enabled boolean NOT NULL DEFAULT TRUE,
     PRIMARY KEY (id)
 );
 
 CREATE TABLE IF NOT EXISTS "genders" (
     id smallserial,
     label character varying(100) NOT NULL UNIQUE,
+    enabled boolean NOT NULL DEFAULT TRUE,
     PRIMARY KEY (id)
 );
 
 CREATE TABLE IF NOT EXISTS "categories" (
     id smallserial,
     label text NOT NULL UNIQUE,
+    enabled boolean NOT NULL DEFAULT TRUE,
     PRIMARY KEY (id)
 );
 
@@ -22,9 +25,15 @@ CREATE TABLE IF NOT EXISTS "categories" (
 CREATE TABLE IF NOT EXISTS "mime_types" (
        id smallserial,
        essence VARCHAR(50) UNIQUE,
-       container VARCHAR(100),
-       codec VARCHAR(100),
-       extension VARCHAR(100),
+       PRIMARY KEY (id)
+       );
+
+CREATE TABLE IF NOT EXISTS "audio_formats" (
+       id smallserial,
+       container VARCHAR(100) NOT NULL,
+       codec VARCHAR(100) NOT NULL,
+       extension VARCHAR(100) NOT NULL,
+       mime_type_id SMALLINT NOT NULL REFERENCES "mime_types" (id),
        UNIQUE (container, codec),
        PRIMARY KEY (id)
        );
@@ -38,7 +47,6 @@ CREATE TABLE IF NOT EXISTS "recordings" (
     updated_at timestamp with time zone NOT NULL DEFAULT NOW(),
     deleted_at timestamp with time zone,
     category_id smallint NOT NULL REFERENCES "categories" (id),
-    unlisted boolean NOT NULL,
     parent_id uuid REFERENCES "recordings" (id),
     name text,
     age_id smallint REFERENCES "ages" (id),

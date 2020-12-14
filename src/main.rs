@@ -3,7 +3,6 @@ use std::error::Error;
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use cfg_if::cfg_if;
 use slog::{info, Drain};
 use warp::Filter;
 
@@ -19,16 +18,18 @@ use backend::urls::Urls;
 async fn main() -> Result<(), Box<dyn Error>> {
     dotenv::dotenv().ok();
 
-    cfg_if! {
-        if #[cfg(enable_warp_logging)] {
-            pretty_env_logger::init();
-        }
-    }
-
     let store = Arc::new(S3Store::from_env().expect("initialize S3 store from environment"));
 
     let logger = initialize_logger();
-    info!(logger, "Starting...");
+    let build_timestamp = env::var("BUILD_TIMESTAMP");
+    let revision = env::var("BACKEND_REVISION");
+
+    let version = match (build_timestamp, revision) {
+        (Ok(bt), Ok(r)) => format!(" (r{} built at {})", bt, r),
+        _ => "".to_owned(),
+    };
+
+    info!(logger, "Starting{}...", version);
     let logger = Arc::new(logger);
 
     let ffprobe_path = get_ffprobe(env::var("BACKEND_FFPROBE_PATH").ok());
@@ -47,21 +48,30 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let environment = Environment::new(logger, db, urls, store, checker);
 
+    let formats_route = routes::make_formats_route(environment.clone());
+    let ages_list_route = routes::make_ages_list_route(environment.clone());
+    let categories_list_route = routes::make_categories_list_route(environment.clone());
+    let genders_list_route = routes::make_genders_list_route(environment.clone());
     let count_route = routes::make_count_route(environment.clone());
     let upload_route = routes::make_upload_route(environment.clone());
     let children_route = routes::make_children_route(environment.clone());
     let delete_route = routes::make_delete_route(environment.clone());
     let retrieve_route = routes::make_retrieve_route(environment.clone());
-    let hide_route = routes::make_hide_route(environment.clone());
 
-    let routes = count_route
+    let routes = formats_route
+        .or(ages_list_route)
+        .or(categories_list_route)
+        .or(genders_list_route)
+        .or(count_route)
         .or(upload_route)
         .or(children_route)
         .or(delete_route)
-        .or(retrieve_route)
-        .or(hide_route);
+        .or(retrieve_route);
 
-    warp::serve(routes).run(([127, 0, 0, 1], 3030)).await;
+    let port: u16 = get_variable("BACKEND_PORT")
+        .parse()
+        .expect("parse BACKEND_PORT as u16");
+    warp::serve(routes).run(([127, 0, 0, 1], port)).await;
 
     Ok(())
 }
@@ -71,19 +81,12 @@ fn initialize_logger() -> slog::Logger {
     use slog_async::Async;
     use slog_json::Json;
 
-    #[cfg(enable_warp_logging)]
-    static mut SLOG_SCOPE_GUARD: Option<slog_envlogger::EnvLogger> = None;
-
     // TODO is this the correct sequence?
     let drain = Mutex::new(Json::default(std::io::stderr())).map(Fuse);
     let drain = Async::new(drain).build().fuse();
 
-    cfg_if! {
-        if #[cfg(enable_warp_logging)] {
-            debug!(logger, "Setting up Warp logging...");
-            SLOG_SCOPE_GUARD = slog_envlogger::new(drain);
-        }
-    }
+    #[cfg(feature = "enable_warp_logging")]
+    pretty_env_logger::init();
 
     Logger::root(
         drain,

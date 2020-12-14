@@ -7,7 +7,7 @@ use crate::store::Store;
 use crate::urls::Urls;
 use crate::{audio::format::AudioFormat, db::Db};
 
-pub type Checker = dyn Fn(&[u8]) -> Result<AudioFormat, BackendError> + Send + Sync;
+pub type Checker = dyn Fn(&[u8]) -> Result<Vec<AudioFormat>, BackendError> + Send + Sync;
 pub type VecStore<O> = dyn Store<Output = O, Raw = Vec<u8>> + Send + Sync;
 
 #[derive(Clone)]
@@ -16,7 +16,7 @@ pub struct Environment<O: Clone + Send + Sync> {
     pub db: Arc<dyn Db + Send + Sync>,
     pub urls: Arc<Urls>,
     pub store: Arc<VecStore<O>>,
-    pub checker: Arc<dyn Fn(&[u8]) -> Result<AudioFormat, BackendError> + Send + Sync>,
+    pub checker: Arc<Checker>,
 }
 
 impl<O: Clone + Send + Sync> Environment<O> {

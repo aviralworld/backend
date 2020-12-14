@@ -10,7 +10,7 @@ pub mod format;
 use format::AudioFormat;
 
 pub trait CodecChecker {
-    fn identify(&self, logger: Arc<Logger>, data: &[u8]) -> Result<AudioFormat, BackendError>;
+    fn identify(&self, logger: Arc<Logger>, data: &[u8]) -> Result<Vec<AudioFormat>, BackendError>;
 
     fn new(ffprobe_path: Option<impl AsRef<Path>>) -> Self;
 }
@@ -18,7 +18,7 @@ pub trait CodecChecker {
 pub fn make_wrapper(
     logger: Arc<Logger>,
     ffprobe_path: Option<PathBuf>,
-) -> impl Fn(&[u8]) -> Result<AudioFormat, BackendError> {
+) -> impl Fn(&[u8]) -> Result<Vec<AudioFormat>, BackendError> {
     let checker = inner::Checker::new(ffprobe_path);
 
     move |data: &[u8]| checker.identify(logger.clone(), data)
@@ -73,7 +73,11 @@ mod inner {
     impl Checker {}
 
     impl super::CodecChecker for Checker {
-        fn identify(&self, _logger: Arc<Logger>, data: &[u8]) -> Result<AudioFormat, BackendError> {
+        fn identify(
+            &self,
+            _logger: Arc<Logger>,
+            data: &[u8],
+        ) -> Result<Vec<AudioFormat>, BackendError> {
             use std::io::Write;
             use std::process::Command;
 
@@ -104,9 +108,14 @@ mod inner {
 
             let stream = streams.first().unwrap();
             let codec = &stream.codec_name;
-            let format = &parsed.format.format_name;
 
-            Ok(AudioFormat::new(format.to_owned(), codec.to_owned()))
+            // ffprobe sometimes returns multiple container formats, so
+            // we just take the first one
+            let formats = parsed.format.format_name.split(',');
+
+            Ok(formats
+                .map(|format| AudioFormat::new(format.to_owned(), codec.to_owned()))
+                .collect::<Vec<_>>())
         }
 
         fn new(path: Option<impl AsRef<Path>>) -> Self {
