@@ -176,8 +176,8 @@ pub struct UploadMetadata {
     #[serde(deserialize_with = "normalization::deserialize_option")]
     pub(crate) occupation: Option<String>,
 
-    /// The ID of the recording it follows, if any.
-    pub(crate) parent_id: Option<Uuid>,
+    /// The token using which this recording was created.
+    pub(crate) token: Uuid,
 
     /// The ID of the category it falls into.
     pub(crate) category_id: Id,

@@ -62,3 +62,10 @@ CREATE TABLE IF NOT EXISTS "recordings" (
 );
 
 CREATE INDEX "parent_index" ON "recordings" ("parent_id") WHERE "parent_id" IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS "recording_tokens" (
+   id uuid,
+   parent_id uuid NOT NULL REFERENCES "recordings" ("ID"),
+   start TIMESTAMP WITH TIME ZONE,
+   PRIMARY KEY (id)
+);

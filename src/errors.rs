@@ -93,4 +93,9 @@ pub enum BackendError {
     /// audio format.
     #[error("unknown audio format")]
     UnrecognizedAudioFormat,
+
+    /// Represents an error caused by an invalid token when uploading
+    /// a recording.
+    #[error("invalid token: {token}")]
+    InvalidToken { token: Uuid },
 }

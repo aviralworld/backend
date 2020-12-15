@@ -289,7 +289,12 @@ async fn process_upload<O: Clone + Send + Sync>(
     debug!(logger, "Parsing submission...");
     let upload = parse_upload(content).await.map_err(error_handler)?;
 
-    let metadata = parse_recording_metadata(logger.clone(), upload.metadata).await.map_err(error_handler)?;
+    let metadata = parse_recording_metadata(logger.clone(), upload.metadata)
+        .await
+        .map_err(error_handler)?;
+    let parent_id = start_using_token(logger.clone(), db.clone(), metadata.token.clone())
+        .await
+        .map_err(error_handler)?;
 
     debug!(logger, "Verifying audio contents...");
     let (verified_audio, audio_format) = verify_audio(logger.clone(), checker, upload.audio)
@@ -298,7 +303,7 @@ async fn process_upload<O: Clone + Send + Sync>(
 
     // TODO retry in case ID already exists
     debug!(logger, "Writing metadata to database...");
-    let id = save_recording_metadata(logger.clone(), db.clone(), metadata)
+    let id = save_recording_metadata(logger.clone(), db.clone(), &parent_id, metadata)
         .await
         .map_err(&error_handler)?;
     let id_as_str = format!("{}", id);
@@ -418,16 +423,30 @@ async fn retrieve_recording<O: Clone + Send + Sync>(
     }
 }
 
-async fn parse_recording_metadata(_logger: Arc<Logger>, part: Part) -> Result<UploadMetadata, BackendError> {
+async fn parse_recording_metadata(
+    _logger: Arc<Logger>,
+    part: Part,
+) -> Result<UploadMetadata, BackendError> {
     use crate::io;
 
     let raw_metadata = io::part_as_vec(part)
         .await
         .map_err(|_| BackendError::MalformedFormSubmission)?;
-    
-    let upload_metadata: UploadMetadata = serde_json::from_slice(&raw_metadata).map_err(BackendError::MalformedUploadMetadata)?;
+
+    let upload_metadata: UploadMetadata =
+        serde_json::from_slice(&raw_metadata).map_err(BackendError::MalformedUploadMetadata)?;
 
     Ok(upload_metadata)
+}
+
+async fn start_using_token(
+    _logger: Arc<Logger>,
+    db: Arc<dyn Db + Send + Sync>,
+    token: Uuid,
+) -> Result<Uuid, BackendError> {
+    let parent_id = db.try_using_token(&token).await.map_err(|_| BackendError::InvalidToken { token })?;
+
+    parent_id.ok_or_else(|| BackendError::InvalidToken { token })
 }
 
 async fn verify_audio(
@@ -453,9 +472,10 @@ async fn verify_audio(
 async fn save_recording_metadata(
     _logger: Arc<Logger>,
     db: Arc<dyn Db + Send + Sync>,
+    parent_id: &Uuid,
     metadata: UploadMetadata,
 ) -> Result<Uuid, BackendError> {
-    let new_recording = db.insert(metadata).await?;
+    let new_recording = db.insert(parent_id, metadata).await?;
     let id = new_recording.id();
 
     Ok(*id)
@@ -512,6 +532,7 @@ fn status_code_for(e: &BackendError) -> StatusCode {
         BackendError::InvalidAudioFormat { .. } => StatusCode::UNSUPPORTED_MEDIA_TYPE,
         PartsMissing => StatusCode::BAD_REQUEST,
         NameAlreadyExists => StatusCode::FORBIDDEN,
+        InvalidToken { .. } => StatusCode::UNAUTHORIZED,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }

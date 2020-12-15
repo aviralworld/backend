@@ -13,7 +13,11 @@ pub trait Db {
 
     fn delete(&self, id: &Uuid) -> BoxFuture<Result<(), BackendError>>;
 
-    fn insert(&self, metadata: UploadMetadata) -> BoxFuture<Result<NewRecording, BackendError>>;
+    fn insert(
+        &self,
+        parent_id: &Uuid,
+        metadata: UploadMetadata,
+    ) -> BoxFuture<Result<NewRecording, BackendError>>;
 
     fn retrieve(&self, id: &Uuid) -> BoxFuture<Result<Option<Recording>, BackendError>>;
 
@@ -29,6 +33,10 @@ pub trait Db {
         &self,
         format: &AudioFormat,
     ) -> BoxFuture<Result<Option<MimeType>, BackendError>>;
+
+    fn rollback_using_token(&self, token: &Uuid) -> BoxFuture<Result<(), BackendError>>;
+
+    fn try_using_token(&self, token: &Uuid) -> BoxFuture<Result<Option<Uuid>, BackendError>>;
 
     fn update_url(
         &self,
@@ -87,9 +95,10 @@ mod postgres {
 
         fn insert(
             &self,
+            parent_id: &Uuid,
             metadata: UploadMetadata,
         ) -> BoxFuture<Result<NewRecording, BackendError>> {
-            insert(metadata, &self.pool).boxed()
+            insert(*parent_id, metadata, &self.pool).boxed()
         }
 
         fn retrieve(&self, id: &Uuid) -> BoxFuture<Result<Option<Recording>, BackendError>> {
@@ -117,6 +126,14 @@ mod postgres {
             format: &AudioFormat,
         ) -> BoxFuture<Result<Option<MimeType>, BackendError>> {
             retrieve_mime_type(format.clone(), &self.pool).boxed()
+        }
+
+        fn rollback_using_token(&self, token: &Uuid) -> BoxFuture<Result<(), BackendError>> {
+            rollback_using_token(*token, &self.pool).boxed()
+        }
+
+        fn try_using_token(&self, token: &Uuid) -> BoxFuture<Result<Option<Uuid>, BackendError>> {
+            try_using_token(*token, &self.pool).boxed()
         }
 
         fn update_url(
@@ -166,7 +183,11 @@ mod postgres {
         }
     }
 
-    async fn insert(metadata: UploadMetadata, pool: &PgPool) -> Result<NewRecording, BackendError> {
+    async fn insert(
+        parent_id: Uuid,
+        metadata: UploadMetadata,
+        pool: &PgPool,
+    ) -> Result<NewRecording, BackendError> {
         use sqlx::prelude::*;
 
         let query: QueryAs<Postgres, (Uuid, OffsetDateTime, OffsetDateTime)> =
@@ -176,7 +197,7 @@ mod postgres {
             .bind(&DEFAULT_URL)
             .bind(None::<Option<i16>>)
             .bind(&metadata.category_id)
-            .bind(&metadata.parent_id)
+            .bind(parent_id)
             .bind(&metadata.name)
             .bind(&metadata.location)
             .bind(&metadata.occupation)
@@ -294,6 +315,34 @@ mod postgres {
             .map_err(map_sqlx_error)?;
 
         Ok(mime_type)
+    }
+
+    async fn rollback_using_token(token: Uuid, pool: &PgPool) -> Result<(), BackendError> {
+        let query =
+            sqlx::query(include_str!("queries/start_using_token.sql"));
+
+        query.bind(token)
+            .execute(pool)
+            .await
+            .map_err(map_sqlx_error)?;
+
+        Ok(())
+}
+
+    async fn try_using_token(token: Uuid, pool: &PgPool) -> Result<Option<Uuid>, BackendError> {
+        use sqlx::prelude::*;
+
+        let query: QueryAs<Postgres, (Uuid,)> =
+            sqlx::query_as(include_str!("queries/start_using_token.sql"));
+
+        let parent_id = query
+            .bind(token)
+            .fetch_optional(pool)
+            .await
+            .map_err(map_sqlx_error)?
+            .map(|(parent_id,)| parent_id);
+
+        Ok(parent_id)
     }
 
     async fn update_url(

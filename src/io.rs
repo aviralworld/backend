@@ -31,6 +31,7 @@ pub async fn collect_parts(content: FormData) -> Result<Vec<Part>, BackendError>
 pub fn parse_parts(parts: &mut Vec<Part>) -> Result<Upload, BackendError> {
     let mut audio = None;
     let mut metadata = None;
+    let mut token = None;
 
     for p in parts.drain(0..) {
         let name = p.name().to_owned();
@@ -39,11 +40,12 @@ pub fn parse_parts(parts: &mut Vec<Part>) -> Result<Upload, BackendError> {
             audio = Some(p);
         } else if name == "metadata" {
             metadata = Some(p);
+        } else if name == "token" {
+            token = Some(p);
         }
     }
 
-    if metadata.is_none() || audio.is_none() {
-        // TODO this should be a more specific error
+    if metadata.is_none() || audio.is_none() || token.is_none() {
         return Err(BackendError::PartsMissing);
     }
 
