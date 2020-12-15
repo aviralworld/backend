@@ -477,8 +477,7 @@ async fn lock_token(
 ) -> Result<Uuid, BackendError> {
     let parent_id = db
         .lock_token(&token)
-        .await
-        .map_err(|_| BackendError::InvalidToken { token })?;
+        .await?;
 
     parent_id.ok_or_else(|| BackendError::InvalidToken { token })
 }
