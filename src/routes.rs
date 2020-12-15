@@ -371,7 +371,7 @@ async fn process_upload<O: Clone + Send + Sync>(
                 .map_err(&error_handler)?;
 
             debug!(logger, "Creating child tokens...");
-            let tokens = create_tokens(logger.clone(), db.clone(), parent_id.clone(), environment.config.tokens_per_recording).await.map_err(&error_handler)?;
+            let tokens = create_tokens(logger.clone(), db.clone(), id.clone(), environment.config.tokens_per_recording).await.map_err(&error_handler)?;
 
             debug!(logger, "Sending response...");
             let response = SuccessResponse::Upload {
