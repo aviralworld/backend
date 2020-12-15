@@ -220,7 +220,7 @@ mod postgres {
         use sqlx::prelude::*;
 
         let query: QueryAs<Postgres, (Uuid,)> =
-            sqlx::query_as(include_str!("queries/acquire_token.sql"));
+            sqlx::query_as(include_str!("queries/lock_token.sql"));
 
         let parent_id = query
             .bind(token)
