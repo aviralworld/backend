@@ -47,6 +47,8 @@ pub struct Config {
 
 impl Config {
     pub fn new(tokens_per_recording: u8) -> Self {
-        Self { tokens_per_recording }
+        Self {
+            tokens_per_recording,
+        }
     }
 }

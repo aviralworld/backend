@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use futures::future::{BoxFuture, FutureExt};
 use serde::Serialize;
-use slog::{debug, error, Logger, trace};
+use slog::{debug, error, trace, Logger};
 use url::Url;
 use uuid::Uuid;
 use warp::filters::multipart::{form, FormData, Part};
@@ -296,12 +296,12 @@ async fn process_upload<O: Clone + Send + Sync>(
         .await
         .map_err(error_handler)?;
 
-    let token = metadata.token.clone();
+    let token = metadata.token;
 
     let logger = Arc::new(logger.new(o!("token" => format!("{}", token.clone()))));
 
     debug!(logger, "Locking token...");
-    let parent_id = lock_token(logger.clone(), db.clone(), token.clone())
+    let parent_id = lock_token(logger.clone(), db.clone(), token)
         .await
         .map_err(error_handler)?;
 
@@ -312,10 +312,10 @@ async fn process_upload<O: Clone + Send + Sync>(
         // errors, then go back to normal error handling
         let logger = logger.clone();
         let db = db.clone();
-        let token = token.clone();
+        let token = token;
 
         tokio::spawn(async move {
-            release_token(logger.clone(), db.clone(), token.clone())
+            release_token(logger.clone(), db.clone(), token)
                 .await
                 .map_err(|e| {
                     error!(logger, "Failed to release token: {}", e);
@@ -368,12 +368,19 @@ async fn process_upload<O: Clone + Send + Sync>(
                 .map_err(&error_handler)?;
 
             debug!(logger, "Removing parent token...");
-            remove_token(logger.clone(), db.clone(), token.clone())
+            remove_token(logger.clone(), db.clone(), token)
                 .await
                 .map_err(&error_handler)?;
 
             debug!(logger, "Creating child tokens...");
-            let tokens = create_tokens(logger.clone(), db.clone(), id.clone(), environment.config.tokens_per_recording).await.map_err(&error_handler)?;
+            let tokens = create_tokens(
+                logger.clone(),
+                db.clone(),
+                id,
+                environment.config.tokens_per_recording,
+            )
+            .await
+            .map_err(&error_handler)?;
 
             debug!(logger, "Sending response...");
             let response = SuccessResponse::Upload {
@@ -482,11 +489,9 @@ async fn lock_token(
     db: Arc<dyn Db + Send + Sync>,
     token: Uuid,
 ) -> Result<Uuid, BackendError> {
-    let parent_id = db
-        .lock_token(&token)
-        .await?;
+    let parent_id = db.lock_token(&token).await?;
 
-    parent_id.ok_or_else(|| BackendError::InvalidToken { token })
+    parent_id.ok_or(BackendError::InvalidToken { token })
 }
 
 async fn release_token(
@@ -565,7 +570,12 @@ async fn remove_token(
     db.remove_token(&token).await
 }
 
-async fn create_tokens(logger: Arc<Logger>, db: Arc<dyn Db + Send + Sync>, token: Uuid, count: u8) -> Result<Vec<Uuid>, BackendError> {
+async fn create_tokens(
+    logger: Arc<Logger>,
+    db: Arc<dyn Db + Send + Sync>,
+    token: Uuid,
+    count: u8,
+) -> Result<Vec<Uuid>, BackendError> {
     let mut tokens: Vec<Uuid> = vec![];
 
     for i in 0..count {

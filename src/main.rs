@@ -46,7 +46,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
         get_variable("BACKEND_RECORDINGS_PATH"),
     ));
 
-    let config = Config::new(get_variable("BACKEND_TOKENS_PER_RECORDING").parse().expect("parse BACKEND_TOKENS_PER_RECORDING as u8"));
+    let config = Config::new(
+        get_variable("BACKEND_TOKENS_PER_RECORDING")
+            .parse()
+            .expect("parse BACKEND_TOKENS_PER_RECORDING as u8"),
+    );
     let environment = Environment::new(logger, db, urls, store, checker, config);
 
     let formats_route = routes::make_formats_route(environment.clone());

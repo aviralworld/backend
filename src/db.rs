@@ -186,9 +186,10 @@ mod postgres {
     async fn create_token(parent_id: Uuid, pool: &PgPool) -> Result<Uuid, BackendError> {
         use sqlx::prelude::*;
 
-        let query: QueryAs<Postgres, (Uuid, )> = sqlx::query_as(include_str!("queries/create_token.sql"));
+        let query: QueryAs<Postgres, (Uuid,)> =
+            sqlx::query_as(include_str!("queries/create_token.sql"));
 
-        let (token, ) = query
+        let (token,) = query
             .bind(parent_id)
             .fetch_one(pool)
             .await
