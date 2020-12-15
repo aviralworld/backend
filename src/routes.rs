@@ -305,6 +305,8 @@ async fn process_upload<O: Clone + Send + Sync>(
         .await
         .map_err(error_handler)?;
 
+    let logger = Arc::new(logger.new(o!("parent_id" => format!("{}", parent_id.clone()))));
+
     let error_handler = |e: BackendError| {
         // first spawn a task to release the token, logging any
         // errors, then go back to normal error handling
