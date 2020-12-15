@@ -12,7 +12,7 @@ use url::Url;
 use warp::http::StatusCode;
 
 use backend::db::Db;
-use backend::environment::Environment;
+use backend::environment::{Config, Environment};
 use backend::errors;
 use backend::routes;
 use backend::store::S3Store;
@@ -27,6 +27,7 @@ use backend::{
 struct CreationResponse {
     message: Option<String>,
     id: Option<String>,
+    tokens: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -54,6 +55,8 @@ static SLOG_SCOPE_GUARD: OnceCell<slog_scope::GlobalLoggerGuard> = OnceCell::new
 
 const BOUNDARY: &str = "thisisaboundary1234";
 
+const TOKENS_PER_RECORDING: u8 = 4;
+
 #[tokio::test]
 async fn api_works() {
     test_formats().await;
@@ -69,7 +72,7 @@ async fn api_works() {
     let base_path = Path::new(&cargo_dir);
     let file_path = base_path.join("tests").join("opus_file.ogg");
 
-    let id = test_upload(&file_path, &content_type).await;
+    let (id, tokens) = test_upload(&file_path, &content_type).await;
     test_duplicate_upload(&file_path, &content_type).await;
 
     let children: serde_json::Value = serde_json::from_reader(
@@ -78,7 +81,7 @@ async fn api_works() {
     )
     .expect("parse simple_metadata_children.json");
 
-    let ids = test_uploading_children(&file_path, &content_type, &id, children).await;
+    let ids = test_uploading_children(&file_path, &content_type, &id, tokens, children).await;
 
     let id_to_delete = ids.get(2).expect("get third child ID");
     test_deletion(id_to_delete, &id, &ids).await;
@@ -193,7 +196,10 @@ async fn test_genders() {
     assert_eq!(genders, *GENDERS);
 }
 
-async fn test_upload(file_path: impl AsRef<Path>, content_type: impl AsRef<str>) -> String {
+async fn test_upload(
+    file_path: impl AsRef<Path>,
+    content_type: impl AsRef<str>,
+) -> (String, Vec<String>) {
     let bytes = fs::read("tests/simple_metadata.json").expect("read simple_metadata.json");
 
     let response = upload_file(
@@ -227,52 +233,93 @@ async fn test_upload(file_path: impl AsRef<Path>, content_type: impl AsRef<str>)
     assert_eq!(segments[0], "recs");
     assert_eq!(segments.len(), 2);
 
-    let id = serde_json::from_str::<CreationResponse>(&body)
-        .expect("parse response as JSON")
-        .id
-        .expect("get ID from response");
+    let response = serde_json::from_str::<CreationResponse>(&body).expect("parse response as JSON");
+
+    let id = response.id.expect("get ID from response");
 
     assert_ne!(id, "", "response must provide non-blank key");
 
-    id
+    let tokens = response.tokens.unwrap();
+
+    assert_eq!(
+        tokens.len(),
+        TOKENS_PER_RECORDING as usize,
+        "response must provide the correct number of tokens"
+    );
+
+    (id, tokens)
 }
 
 async fn test_duplicate_upload(file_path: impl AsRef<Path>, content_type: impl AsRef<str>) {
     let filter = make_upload_filter("check_duplicate_upload").await;
 
-    // ensure the same name cannot be reused
-    let bytes = fs::read("tests/duplicate_metadata.json").expect("read duplicate_metadata.json");
+    // ensure the token cannot be reused
+    {
+        let bytes = fs::read("tests/simple_metadata_with_same_token.json")
+            .expect("read simple_metadata_with_same_token.json");
 
-    let response = upload_file(
-        &file_path,
-        content_type.as_ref(),
-        BOUNDARY.as_bytes(),
-        &bytes,
-    )
-    .reply(&filter)
-    .await;
+        let response = upload_file(
+            &file_path,
+            content_type.as_ref(),
+            BOUNDARY.as_bytes(),
+            &bytes,
+        )
+        .reply(&filter)
+        .await;
 
-    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 
-    let body = String::from_utf8_lossy(response.body()).into_owned();
+        let body = String::from_utf8_lossy(response.body()).into_owned();
 
-    let deserialized: CreationResponse =
-        serde_json::from_str(&body).expect("parse response as JSON");
-    assert!(
-        deserialized.id.is_none(),
-        "error response must not include key"
-    );
-    assert_eq!(
-        deserialized.message,
-        Some("name already exists in database".to_owned()),
-        "error response must mention name already exists in database"
-    );
+        let deserialized: CreationResponse =
+            serde_json::from_str(&body).expect("parse response as JSON");
+        assert!(
+            deserialized.id.is_none(),
+            "error response must not include key"
+        );
+        assert!(
+            deserialized.message.unwrap().starts_with("invalid token"),
+            "error response must mention invalid token"
+        );
+    }
+
+    // ensure the name cannot be reused
+    {
+        let bytes =
+            fs::read("tests/duplicate_metadata.json").expect("read duplicate_metadata.json");
+
+        let response = upload_file(
+            &file_path,
+            content_type.as_ref(),
+            BOUNDARY.as_bytes(),
+            &bytes,
+        )
+        .reply(&filter)
+        .await;
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+        let body = String::from_utf8_lossy(response.body()).into_owned();
+
+        let deserialized: CreationResponse =
+            serde_json::from_str(&body).expect("parse response as JSON");
+        assert!(
+            deserialized.id.is_none(),
+            "error response must not include key"
+        );
+        assert_eq!(
+            deserialized.message,
+            Some("name already exists in database".to_owned()),
+            "error response must mention name already exists in database"
+        );
+    }
 }
 
 async fn test_uploading_children(
     file_path: impl AsRef<Path>,
     content_type: impl AsRef<str>,
     parent: &str,
+    mut tokens: Vec<String>,
     mut children: serde_json::Value,
 ) -> Vec<String> {
     let mut ids = vec![];
@@ -284,7 +331,7 @@ async fn test_uploading_children(
         let child_id = test_uploading_child(
             file_path.as_ref(),
             content_type.as_ref(),
-            parent,
+            tokens.pop().unwrap(),
             &mut child,
         )
         .await;
@@ -303,6 +350,7 @@ async fn test_uploading_children(
             .reply(&children_filter)
             .await;
         assert_eq!(request.status(), StatusCode::OK);
+
         let returned_ids = parse_children_ids(request.body());
         assert_eq!(ids, returned_ids);
     }
@@ -313,12 +361,12 @@ async fn test_uploading_children(
 async fn test_uploading_child(
     file_path: impl AsRef<Path>,
     content_type: impl AsRef<str>,
-    id: &str,
+    token: String,
     child: &mut serde_json::Value,
 ) -> Option<String> {
     let filter = make_upload_filter("test_uploading_child").await;
     let object = child.as_object_mut().expect("get child as object");
-    object.insert("parent_id".to_owned(), serde_json::json!(id));
+    object.insert("token".to_owned(), serde_json::json!(token));
     let bytes = serde_json::to_vec(&object).expect("serialize edited child as JSON");
 
     let response = upload_file(
@@ -419,7 +467,7 @@ async fn test_count() {
         .parse::<i64>()
         .expect("parse count response as i64");
 
-    assert_eq!(count, 4);
+    assert_eq!(count, 5);
 }
 
 #[tokio::test]
@@ -571,12 +619,15 @@ async fn make_environment(test_name: String) -> Environment<()> {
     let checker = make_wrapper_for_test(logger_arc.clone());
     let db = make_db().await;
 
+    let config = Config::new(TOKENS_PER_RECORDING);
+
     Environment::new(
         logger_arc,
         Arc::new(db),
         Arc::new(Urls::new("https://www.example.com/", "recs")),
         Arc::new(make_store()),
         Arc::new(checker),
+        config,
     )
 }
 
