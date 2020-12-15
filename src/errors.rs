@@ -98,4 +98,10 @@ pub enum BackendError {
     /// a recording.
     #[error("invalid token: {token}")]
     InvalidToken { token: Uuid },
+
+    /// Represents an error caused by failing to roll back the use of
+    /// a token when an error occurs during the processing of a
+    /// recording.
+    #[error("token rollback failed for {token}")]
+    TokenRollbackFailed { token: Uuid, source: sqlx::Error },
 }

@@ -1,1 +1,0 @@
-UPDATE "recording_tokens" SET started_upload_at = NULL WHERE id = $1;

@@ -13,6 +13,8 @@ pub trait Db {
 
     fn delete(&self, id: &Uuid) -> BoxFuture<Result<(), BackendError>>;
 
+    fn lock_token(&self, token: &Uuid) -> BoxFuture<Result<Option<Uuid>, BackendError>>;
+
     fn insert(
         &self,
         parent_id: &Uuid,
@@ -34,9 +36,9 @@ pub trait Db {
         format: &AudioFormat,
     ) -> BoxFuture<Result<Option<MimeType>, BackendError>>;
 
-    fn rollback_using_token(&self, token: &Uuid) -> BoxFuture<Result<(), BackendError>>;
+    fn release_token(&self, token: &Uuid) -> BoxFuture<Result<(), BackendError>>;
 
-    fn try_using_token(&self, token: &Uuid) -> BoxFuture<Result<Option<Uuid>, BackendError>>;
+    fn remove_token(&self, token: &Uuid) -> BoxFuture<Result<(), BackendError>>;
 
     fn update_url(
         &self,
@@ -101,6 +103,18 @@ mod postgres {
             insert(*parent_id, metadata, &self.pool).boxed()
         }
 
+        fn lock_token(&self, token: &Uuid) -> BoxFuture<Result<Option<Uuid>, BackendError>> {
+            lock_token(*token, &self.pool).boxed()
+        }
+
+        fn release_token(&self, token: &Uuid) -> BoxFuture<Result<(), BackendError>> {
+            release_token(*token, &self.pool).boxed()
+        }
+
+        fn remove_token(&self, token: &Uuid) -> BoxFuture<Result<(), BackendError>> {
+            remove_token(*token, &self.pool).boxed()
+        }
+
         fn retrieve(&self, id: &Uuid) -> BoxFuture<Result<Option<Recording>, BackendError>> {
             retrieve(*id, &self.pool).boxed()
         }
@@ -126,14 +140,6 @@ mod postgres {
             format: &AudioFormat,
         ) -> BoxFuture<Result<Option<MimeType>, BackendError>> {
             retrieve_mime_type(format.clone(), &self.pool).boxed()
-        }
-
-        fn rollback_using_token(&self, token: &Uuid) -> BoxFuture<Result<(), BackendError>> {
-            rollback_using_token(*token, &self.pool).boxed()
-        }
-
-        fn try_using_token(&self, token: &Uuid) -> BoxFuture<Result<Option<Uuid>, BackendError>> {
-            try_using_token(*token, &self.pool).boxed()
         }
 
         fn update_url(
@@ -208,6 +214,46 @@ mod postgres {
             .map_err(map_sqlx_error)?;
 
         Ok(NewRecording::new(id, created_at, updated_at, metadata))
+    }
+
+    async fn lock_token(token: Uuid, pool: &PgPool) -> Result<Option<Uuid>, BackendError> {
+        use sqlx::prelude::*;
+
+        let query: QueryAs<Postgres, (Uuid,)> =
+            sqlx::query_as(include_str!("queries/acquire_token.sql"));
+
+        let parent_id = query
+            .bind(token)
+            .fetch_optional(pool)
+            .await
+            .map_err(map_sqlx_error)?
+            .map(|(parent_id,)| parent_id);
+
+        Ok(parent_id)
+    }
+
+    async fn release_token(token: Uuid, pool: &PgPool) -> Result<(), BackendError> {
+        let query = sqlx::query(include_str!("queries/release_token.sql"));
+
+        query
+            .bind(token)
+            .execute(pool)
+            .await
+            .map_err(map_sqlx_error)?;
+
+        Ok(())
+    }
+
+    async fn remove_token(token: Uuid, pool: &PgPool) -> Result<(), BackendError> {
+        let query = sqlx::query(include_str!("queries/remove_token.sql"));
+
+        query
+            .bind(token)
+            .execute(pool)
+            .await
+            .map_err(map_sqlx_error)?;
+
+        Ok(())
     }
 
     async fn retrieve(id: Uuid, pool: &PgPool) -> Result<Option<Recording>, BackendError> {
@@ -315,34 +361,6 @@ mod postgres {
             .map_err(map_sqlx_error)?;
 
         Ok(mime_type)
-    }
-
-    async fn rollback_using_token(token: Uuid, pool: &PgPool) -> Result<(), BackendError> {
-        let query =
-            sqlx::query(include_str!("queries/start_using_token.sql"));
-
-        query.bind(token)
-            .execute(pool)
-            .await
-            .map_err(map_sqlx_error)?;
-
-        Ok(())
-}
-
-    async fn try_using_token(token: Uuid, pool: &PgPool) -> Result<Option<Uuid>, BackendError> {
-        use sqlx::prelude::*;
-
-        let query: QueryAs<Postgres, (Uuid,)> =
-            sqlx::query_as(include_str!("queries/start_using_token.sql"));
-
-        let parent_id = query
-            .bind(token)
-            .fetch_optional(pool)
-            .await
-            .map_err(map_sqlx_error)?
-            .map(|(parent_id,)| parent_id);
-
-        Ok(parent_id)
     }
 
     async fn update_url(

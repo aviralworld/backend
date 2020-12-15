@@ -273,6 +273,8 @@ async fn process_upload<O: Clone + Send + Sync>(
     environment: Environment<O>,
     content: FormData,
 ) -> Result<WithHeader<WithStatus<Json>>, reject::Rejection> {
+    use slog::o;
+
     let Environment {
         logger,
         store,
@@ -292,9 +294,33 @@ async fn process_upload<O: Clone + Send + Sync>(
     let metadata = parse_recording_metadata(logger.clone(), upload.metadata)
         .await
         .map_err(error_handler)?;
-    let parent_id = start_using_token(logger.clone(), db.clone(), metadata.token.clone())
+
+    let token = metadata.token.clone();
+
+    let logger = Arc::new(logger.new(o!("token" => format!("{}", token.clone()))));
+
+    debug!(logger, "Locking token...");
+    let parent_id = lock_token(logger.clone(), db.clone(), token.clone())
         .await
         .map_err(error_handler)?;
+
+    let error_handler = |e: BackendError| {
+        // first spawn a task to release the token, logging any
+        // errors, then go back to normal error handling
+        let logger = logger.clone();
+        let db = db.clone();
+        let token = token.clone();
+
+        tokio::spawn(async move {
+            release_token(logger.clone(), db.clone(), token.clone())
+                .await
+                .map_err(|e| {
+                    error!(logger, "Failed to release token: {}", e);
+                })
+        });
+
+        error_handler(e)
+    };
 
     debug!(logger, "Verifying audio contents...");
     let (verified_audio, audio_format) = verify_audio(logger.clone(), checker, upload.audio)
@@ -307,7 +333,7 @@ async fn process_upload<O: Clone + Send + Sync>(
         .await
         .map_err(&error_handler)?;
     let id_as_str = format!("{}", id);
-    let logger = Arc::new(logger.new(slog::o!("id" => id_as_str.clone())));
+    let logger = Arc::new(logger.new(o!("id" => id_as_str.clone())));
 
     let error_handler = |e: BackendError| {
         // TODO delete row from DB
@@ -335,6 +361,11 @@ async fn process_upload<O: Clone + Send + Sync>(
 
             debug!(logger, "Updating recording URL...");
             update_recording_url(logger.clone(), db.clone(), store.clone(), &id, mime_type)
+                .await
+                .map_err(&error_handler)?;
+
+            debug!(logger, "Removing token...");
+            remove_token(logger.clone(), db.clone(), token.clone())
                 .await
                 .map_err(&error_handler)?;
 
@@ -439,14 +470,25 @@ async fn parse_recording_metadata(
     Ok(upload_metadata)
 }
 
-async fn start_using_token(
+async fn lock_token(
     _logger: Arc<Logger>,
     db: Arc<dyn Db + Send + Sync>,
     token: Uuid,
 ) -> Result<Uuid, BackendError> {
-    let parent_id = db.try_using_token(&token).await.map_err(|_| BackendError::InvalidToken { token })?;
+    let parent_id = db
+        .lock_token(&token)
+        .await
+        .map_err(|_| BackendError::InvalidToken { token })?;
 
     parent_id.ok_or_else(|| BackendError::InvalidToken { token })
+}
+
+async fn release_token(
+    _logger: Arc<Logger>,
+    db: Arc<dyn Db + Send + Sync>,
+    token: Uuid,
+) -> Result<(), BackendError> {
+    db.release_token(&token).await
 }
 
 async fn verify_audio(
@@ -507,6 +549,14 @@ async fn update_recording_url<O>(
     db.update_url(key, &url, mime_type.clone()).await?;
 
     Ok(url)
+}
+
+async fn remove_token(
+    _logger: Arc<Logger>,
+    db: Arc<dyn Db + Send + Sync>,
+    token: Uuid,
+) -> Result<(), BackendError> {
+    db.remove_token(&token).await
 }
 
 async fn format_rejection(
