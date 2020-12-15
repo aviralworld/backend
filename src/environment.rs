@@ -17,6 +17,7 @@ pub struct Environment<O: Clone + Send + Sync> {
     pub urls: Arc<Urls>,
     pub store: Arc<VecStore<O>>,
     pub checker: Arc<Checker>,
+    pub config: Config,
 }
 
 impl<O: Clone + Send + Sync> Environment<O> {
@@ -26,6 +27,7 @@ impl<O: Clone + Send + Sync> Environment<O> {
         urls: Arc<Urls>,
         store: Arc<VecStore<O>>,
         checker: Arc<Checker>,
+        config: Config,
     ) -> Self {
         Self {
             logger,
@@ -33,6 +35,20 @@ impl<O: Clone + Send + Sync> Environment<O> {
             urls,
             store,
             checker,
+            config,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct Config {
+    pub(crate) tokens_per_recording: u8,
+}
+
+impl Config {
+    pub fn new(tokens_per_recording: u8) -> Self {
+        Self {
+            tokens_per_recording,
         }
     }
 }

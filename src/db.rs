@@ -11,9 +11,17 @@ pub trait Db {
 
     fn count_all(&self) -> BoxFuture<Result<i64, BackendError>>;
 
+    fn create_token(&self, parent_id: &Uuid) -> BoxFuture<Result<Uuid, BackendError>>;
+
     fn delete(&self, id: &Uuid) -> BoxFuture<Result<(), BackendError>>;
 
-    fn insert(&self, metadata: UploadMetadata) -> BoxFuture<Result<NewRecording, BackendError>>;
+    fn lock_token(&self, token: &Uuid) -> BoxFuture<Result<Option<Uuid>, BackendError>>;
+
+    fn insert(
+        &self,
+        parent_id: &Uuid,
+        metadata: UploadMetadata,
+    ) -> BoxFuture<Result<NewRecording, BackendError>>;
 
     fn retrieve(&self, id: &Uuid) -> BoxFuture<Result<Option<Recording>, BackendError>>;
 
@@ -29,6 +37,10 @@ pub trait Db {
         &self,
         format: &AudioFormat,
     ) -> BoxFuture<Result<Option<MimeType>, BackendError>>;
+
+    fn release_token(&self, token: &Uuid) -> BoxFuture<Result<(), BackendError>>;
+
+    fn remove_token(&self, token: &Uuid) -> BoxFuture<Result<(), BackendError>>;
 
     fn update_url(
         &self,
@@ -81,15 +93,32 @@ mod postgres {
             count_all(&self.pool).boxed()
         }
 
+        fn create_token(&self, parent: &Uuid) -> BoxFuture<Result<Uuid, BackendError>> {
+            create_token(*parent, &self.pool).boxed()
+        }
+
         fn delete(&self, id: &Uuid) -> BoxFuture<Result<(), BackendError>> {
             delete(*id, &self.pool).boxed()
         }
 
         fn insert(
             &self,
+            parent_id: &Uuid,
             metadata: UploadMetadata,
         ) -> BoxFuture<Result<NewRecording, BackendError>> {
-            insert(metadata, &self.pool).boxed()
+            insert(*parent_id, metadata, &self.pool).boxed()
+        }
+
+        fn lock_token(&self, token: &Uuid) -> BoxFuture<Result<Option<Uuid>, BackendError>> {
+            lock_token(*token, &self.pool).boxed()
+        }
+
+        fn release_token(&self, token: &Uuid) -> BoxFuture<Result<(), BackendError>> {
+            release_token(*token, &self.pool).boxed()
+        }
+
+        fn remove_token(&self, token: &Uuid) -> BoxFuture<Result<(), BackendError>> {
+            remove_token(*token, &self.pool).boxed()
         }
 
         fn retrieve(&self, id: &Uuid) -> BoxFuture<Result<Option<Recording>, BackendError>> {
@@ -154,6 +183,21 @@ mod postgres {
         Ok(count)
     }
 
+    async fn create_token(parent_id: Uuid, pool: &PgPool) -> Result<Uuid, BackendError> {
+        use sqlx::prelude::*;
+
+        let query: QueryAs<Postgres, (Uuid,)> =
+            sqlx::query_as(include_str!("queries/create_token.sql"));
+
+        let (token,) = query
+            .bind(parent_id)
+            .fetch_one(pool)
+            .await
+            .map_err(map_sqlx_error)?;
+
+        Ok(token)
+    }
+
     async fn delete(id: Uuid, pool: &PgPool) -> Result<(), BackendError> {
         let query = sqlx::query(include_str!("queries/delete.sql"));
 
@@ -166,7 +210,11 @@ mod postgres {
         }
     }
 
-    async fn insert(metadata: UploadMetadata, pool: &PgPool) -> Result<NewRecording, BackendError> {
+    async fn insert(
+        parent_id: Uuid,
+        metadata: UploadMetadata,
+        pool: &PgPool,
+    ) -> Result<NewRecording, BackendError> {
         use sqlx::prelude::*;
 
         let query: QueryAs<Postgres, (Uuid, OffsetDateTime, OffsetDateTime)> =
@@ -176,7 +224,7 @@ mod postgres {
             .bind(&DEFAULT_URL)
             .bind(None::<Option<i16>>)
             .bind(&metadata.category_id)
-            .bind(&metadata.parent_id)
+            .bind(parent_id)
             .bind(&metadata.name)
             .bind(&metadata.location)
             .bind(&metadata.occupation)
@@ -187,6 +235,46 @@ mod postgres {
             .map_err(map_sqlx_error)?;
 
         Ok(NewRecording::new(id, created_at, updated_at, metadata))
+    }
+
+    async fn lock_token(token: Uuid, pool: &PgPool) -> Result<Option<Uuid>, BackendError> {
+        use sqlx::prelude::*;
+
+        let query: QueryAs<Postgres, (Uuid,)> =
+            sqlx::query_as(include_str!("queries/lock_token.sql"));
+
+        let parent_id = query
+            .bind(token)
+            .fetch_optional(pool)
+            .await
+            .map_err(map_sqlx_error)?
+            .map(|(parent_id,)| parent_id);
+
+        Ok(parent_id)
+    }
+
+    async fn release_token(token: Uuid, pool: &PgPool) -> Result<(), BackendError> {
+        let query = sqlx::query(include_str!("queries/release_token.sql"));
+
+        query
+            .bind(token)
+            .execute(pool)
+            .await
+            .map_err(map_sqlx_error)?;
+
+        Ok(())
+    }
+
+    async fn remove_token(token: Uuid, pool: &PgPool) -> Result<(), BackendError> {
+        let query = sqlx::query(include_str!("queries/remove_token.sql"));
+
+        query
+            .bind(token)
+            .execute(pool)
+            .await
+            .map_err(map_sqlx_error)?;
+
+        Ok(())
     }
 
     async fn retrieve(id: Uuid, pool: &PgPool) -> Result<Option<Recording>, BackendError> {

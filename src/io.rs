@@ -43,7 +43,6 @@ pub fn parse_parts(parts: &mut Vec<Part>) -> Result<Upload, BackendError> {
     }
 
     if metadata.is_none() || audio.is_none() {
-        // TODO this should be a more specific error
         return Err(BackendError::PartsMissing);
     }
 

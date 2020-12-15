@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use futures::future::{BoxFuture, FutureExt};
 use serde::Serialize;
-use slog::{debug, error, Logger};
+use slog::{debug, error, trace, Logger};
 use url::Url;
 use uuid::Uuid;
 use warp::filters::multipart::{form, FormData, Part};
@@ -28,6 +28,7 @@ enum SuccessResponse {
     },
     Upload {
         id: String,
+        tokens: Option<Vec<Uuid>>,
     },
     Count(i64),
 }
@@ -273,6 +274,8 @@ async fn process_upload<O: Clone + Send + Sync>(
     environment: Environment<O>,
     content: FormData,
 ) -> Result<WithHeader<WithStatus<Json>>, reject::Rejection> {
+    use slog::o;
+
     let Environment {
         logger,
         store,
@@ -288,6 +291,40 @@ async fn process_upload<O: Clone + Send + Sync>(
 
     debug!(logger, "Parsing submission...");
     let upload = parse_upload(content).await.map_err(error_handler)?;
+
+    let metadata = parse_recording_metadata(logger.clone(), upload.metadata)
+        .await
+        .map_err(error_handler)?;
+
+    let token = metadata.token;
+
+    let logger = Arc::new(logger.new(o!("token" => format!("{}", token.clone()))));
+
+    debug!(logger, "Locking token...");
+    let parent_id = lock_token(logger.clone(), db.clone(), token)
+        .await
+        .map_err(error_handler)?;
+
+    let logger = Arc::new(logger.new(o!("parent_id" => format!("{}", parent_id.clone()))));
+
+    let error_handler = |e: BackendError| {
+        // first spawn a task to release the token, logging any
+        // errors, then go back to normal error handling
+        let logger = logger.clone();
+        let db = db.clone();
+        let token = token;
+
+        tokio::spawn(async move {
+            release_token(logger.clone(), db.clone(), token)
+                .await
+                .map_err(|e| {
+                    error!(logger, "Failed to release token: {}", e);
+                })
+        });
+
+        error_handler(e)
+    };
+
     debug!(logger, "Verifying audio contents...");
     let (verified_audio, audio_format) = verify_audio(logger.clone(), checker, upload.audio)
         .await
@@ -295,11 +332,11 @@ async fn process_upload<O: Clone + Send + Sync>(
 
     // TODO retry in case ID already exists
     debug!(logger, "Writing metadata to database...");
-    let id = save_recording_metadata(logger.clone(), db.clone(), upload.metadata)
+    let id = save_recording_metadata(logger.clone(), db.clone(), &parent_id, metadata)
         .await
         .map_err(&error_handler)?;
     let id_as_str = format!("{}", id);
-    let logger = Arc::new(logger.new(slog::o!("id" => id_as_str.clone())));
+    let logger = Arc::new(logger.new(o!("id" => id_as_str.clone())));
 
     let error_handler = |e: BackendError| {
         // TODO delete row from DB
@@ -330,9 +367,25 @@ async fn process_upload<O: Clone + Send + Sync>(
                 .await
                 .map_err(&error_handler)?;
 
+            debug!(logger, "Removing parent token...");
+            remove_token(logger.clone(), db.clone(), token)
+                .await
+                .map_err(&error_handler)?;
+
+            debug!(logger, "Creating child tokens...");
+            let tokens = create_tokens(
+                logger.clone(),
+                db.clone(),
+                id,
+                environment.config.tokens_per_recording,
+            )
+            .await
+            .map_err(&error_handler)?;
+
             debug!(logger, "Sending response...");
             let response = SuccessResponse::Upload {
                 id: id_as_str.clone(),
+                tokens: Some(tokens),
             };
 
             Ok(with_header(
@@ -415,6 +468,40 @@ async fn retrieve_recording<O: Clone + Send + Sync>(
     }
 }
 
+async fn parse_recording_metadata(
+    _logger: Arc<Logger>,
+    part: Part,
+) -> Result<UploadMetadata, BackendError> {
+    use crate::io;
+
+    let raw_metadata = io::part_as_vec(part)
+        .await
+        .map_err(|_| BackendError::MalformedFormSubmission)?;
+
+    let upload_metadata: UploadMetadata =
+        serde_json::from_slice(&raw_metadata).map_err(BackendError::MalformedUploadMetadata)?;
+
+    Ok(upload_metadata)
+}
+
+async fn lock_token(
+    _logger: Arc<Logger>,
+    db: Arc<dyn Db + Send + Sync>,
+    token: Uuid,
+) -> Result<Uuid, BackendError> {
+    let parent_id = db.lock_token(&token).await?;
+
+    parent_id.ok_or(BackendError::InvalidToken { token })
+}
+
+async fn release_token(
+    _logger: Arc<Logger>,
+    db: Arc<dyn Db + Send + Sync>,
+    token: Uuid,
+) -> Result<(), BackendError> {
+    db.release_token(&token).await
+}
+
 async fn verify_audio(
     _logger: Arc<Logger>,
     checker: Arc<environment::Checker>,
@@ -438,17 +525,10 @@ async fn verify_audio(
 async fn save_recording_metadata(
     _logger: Arc<Logger>,
     db: Arc<dyn Db + Send + Sync>,
-    metadata: Part,
+    parent_id: &Uuid,
+    metadata: UploadMetadata,
 ) -> Result<Uuid, BackendError> {
-    use crate::io;
-
-    let raw_metadata = io::part_as_vec(metadata)
-        .await
-        .map_err(|_| BackendError::MalformedFormSubmission)?;
-    let metadata: UploadMetadata =
-        serde_json::from_slice(&raw_metadata).map_err(BackendError::MalformedUploadMetadata)?;
-
-    let new_recording = db.insert(metadata).await?;
+    let new_recording = db.insert(parent_id, metadata).await?;
     let id = new_recording.id();
 
     Ok(*id)
@@ -482,6 +562,31 @@ async fn update_recording_url<O>(
     Ok(url)
 }
 
+async fn remove_token(
+    _logger: Arc<Logger>,
+    db: Arc<dyn Db + Send + Sync>,
+    token: Uuid,
+) -> Result<(), BackendError> {
+    db.remove_token(&token).await
+}
+
+async fn create_tokens(
+    logger: Arc<Logger>,
+    db: Arc<dyn Db + Send + Sync>,
+    token: Uuid,
+    count: u8,
+) -> Result<Vec<Uuid>, BackendError> {
+    let mut tokens: Vec<Uuid> = vec![];
+
+    for i in 0..count {
+        trace!(logger, "Creating token #{}...", i; "parent" => format!("{}", token));
+        let token = db.create_token(&token).await?;
+        tokens.push(token);
+    }
+
+    Ok(tokens)
+}
+
 async fn format_rejection(
     logger: Arc<Logger>,
     rej: reject::Rejection,
@@ -503,8 +608,9 @@ fn status_code_for(e: &BackendError) -> StatusCode {
     match e {
         BadRequest | TooManyStreams(..) => StatusCode::BAD_REQUEST,
         BackendError::InvalidAudioFormat { .. } => StatusCode::UNSUPPORTED_MEDIA_TYPE,
-        PartsMissing => StatusCode::BAD_REQUEST,
+        PartsMissing | MalformedUploadMetadata { .. } => StatusCode::BAD_REQUEST,
         NameAlreadyExists => StatusCode::FORBIDDEN,
+        InvalidToken { .. } => StatusCode::UNAUTHORIZED,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     }
 }
