@@ -16,6 +16,7 @@ TRUNCATE ages CASCADE;
 TRUNCATE categories CASCADE;
 TRUNCATE genders CASCADE;
 TRUNCATE mime_types CASCADE;
+TRUNCATE recording_tokens CASCADE;
 
 INSERT INTO ages (id, label, enabled) VALUES (1, 'Age 1', TRUE);
 INSERT INTO ages (id, label, enabled) VALUES (2, 'Age B', TRUE);
@@ -42,6 +43,10 @@ INSERT INTO genders (id, label, enabled) VALUES (5, 'This is a bogus gender', FA
 INSERT INTO mime_types (id, essence) VALUES (1, 'audio/ogg; codec=opus'), (2, 'audio/ogg');
 
 INSERT INTO audio_formats (container, codec, extension, mime_type_id) VALUES ('ogg', 'opus', 'ogg', 1), ('ogg', 'vorbis', 'ogg', 2);
+
+INSERT INTO recordings (id, url, mime_type_id, category_id, name) VALUES ('99df58d8-3ed4-11eb-84c7-0242ac110002', 'https://www.example.com/', 1, 1, 'Fake root recording');
+
+INSERT INTO recording_tokens (id, parent_id) VALUES ('e900020a-3ed4-11eb-84c7-0242ac110002', '99df58d8-3ed4-11eb-84c7-0242ac110002'), ('9c136fe8-3ed6-11eb-9fef-0242ac110002', '99df58d8-3ed4-11eb-84c7-0242ac110002');
 
 --
 -- TOC entry 2980 (class 0 OID 0)
