@@ -11,6 +11,8 @@ pub trait Db {
 
     fn count_all(&self) -> BoxFuture<Result<i64, BackendError>>;
 
+    fn create_token(&self, parent_id: &Uuid) -> BoxFuture<Result<Uuid, BackendError>>;
+
     fn delete(&self, id: &Uuid) -> BoxFuture<Result<(), BackendError>>;
 
     fn lock_token(&self, token: &Uuid) -> BoxFuture<Result<Option<Uuid>, BackendError>>;
@@ -89,6 +91,10 @@ mod postgres {
 
         fn count_all(&self) -> BoxFuture<Result<i64, BackendError>> {
             count_all(&self.pool).boxed()
+        }
+
+        fn create_token(&self, parent: &Uuid) -> BoxFuture<Result<Uuid, BackendError>> {
+            create_token(*parent, &self.pool).boxed()
         }
 
         fn delete(&self, id: &Uuid) -> BoxFuture<Result<(), BackendError>> {
@@ -175,6 +181,20 @@ mod postgres {
         let (count,) = query.fetch_one(pool).await.map_err(map_sqlx_error)?;
 
         Ok(count)
+    }
+
+    async fn create_token(parent_id: Uuid, pool: &PgPool) -> Result<Uuid, BackendError> {
+        use sqlx::prelude::*;
+
+        let query: QueryAs<Postgres, (Uuid, )> = sqlx::query_as(include_str!("queries/create_token.sql"));
+
+        let (token, ) = query
+            .bind(parent_id)
+            .fetch_one(pool)
+            .await
+            .map_err(map_sqlx_error)?;
+
+        Ok(token)
     }
 
     async fn delete(id: Uuid, pool: &PgPool) -> Result<(), BackendError> {

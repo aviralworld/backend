@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use futures::future::{BoxFuture, FutureExt};
 use serde::Serialize;
-use slog::{debug, error, Logger};
+use slog::{debug, error, Logger, trace};
 use url::Url;
 use uuid::Uuid;
 use warp::filters::multipart::{form, FormData, Part};
@@ -28,6 +28,7 @@ enum SuccessResponse {
     },
     Upload {
         id: String,
+        tokens: Option<Vec<Uuid>>,
     },
     Count(i64),
 }
@@ -364,14 +365,18 @@ async fn process_upload<O: Clone + Send + Sync>(
                 .await
                 .map_err(&error_handler)?;
 
-            debug!(logger, "Removing token...");
+            debug!(logger, "Removing parent token...");
             remove_token(logger.clone(), db.clone(), token.clone())
                 .await
                 .map_err(&error_handler)?;
 
+            debug!(logger, "Creating child tokens...");
+            let tokens = create_tokens(logger.clone(), db.clone(), parent_id.clone(), environment.config.tokens_per_recording).await.map_err(&error_handler)?;
+
             debug!(logger, "Sending response...");
             let response = SuccessResponse::Upload {
                 id: id_as_str.clone(),
+                tokens: Some(tokens),
             };
 
             Ok(with_header(
@@ -556,6 +561,18 @@ async fn remove_token(
     token: Uuid,
 ) -> Result<(), BackendError> {
     db.remove_token(&token).await
+}
+
+async fn create_tokens(logger: Arc<Logger>, db: Arc<dyn Db + Send + Sync>, token: Uuid, count: u8) -> Result<Vec<Uuid>, BackendError> {
+    let mut tokens: Vec<Uuid> = vec![];
+
+    for i in 0..count {
+        trace!(logger, "Creating token #{}...", i; "parent" => format!("{}", token));
+        let token = db.create_token(&token).await?;
+        tokens.push(token);
+    }
+
+    Ok(tokens)
 }
 
 async fn format_rejection(
