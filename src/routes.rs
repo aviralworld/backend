@@ -288,6 +288,9 @@ async fn process_upload<O: Clone + Send + Sync>(
 
     debug!(logger, "Parsing submission...");
     let upload = parse_upload(content).await.map_err(error_handler)?;
+
+    let metadata = parse_recording_metadata(logger.clone(), upload.metadata).await.map_err(error_handler)?;
+
     debug!(logger, "Verifying audio contents...");
     let (verified_audio, audio_format) = verify_audio(logger.clone(), checker, upload.audio)
         .await
@@ -295,7 +298,7 @@ async fn process_upload<O: Clone + Send + Sync>(
 
     // TODO retry in case ID already exists
     debug!(logger, "Writing metadata to database...");
-    let id = save_recording_metadata(logger.clone(), db.clone(), upload.metadata)
+    let id = save_recording_metadata(logger.clone(), db.clone(), metadata)
         .await
         .map_err(&error_handler)?;
     let id_as_str = format!("{}", id);
@@ -415,6 +418,18 @@ async fn retrieve_recording<O: Clone + Send + Sync>(
     }
 }
 
+async fn parse_recording_metadata(_logger: Arc<Logger>, part: Part) -> Result<UploadMetadata, BackendError> {
+    use crate::io;
+
+    let raw_metadata = io::part_as_vec(part)
+        .await
+        .map_err(|_| BackendError::MalformedFormSubmission)?;
+    
+    let upload_metadata: UploadMetadata = serde_json::from_slice(&raw_metadata).map_err(BackendError::MalformedUploadMetadata)?;
+
+    Ok(upload_metadata)
+}
+
 async fn verify_audio(
     _logger: Arc<Logger>,
     checker: Arc<environment::Checker>,
@@ -438,16 +453,8 @@ async fn verify_audio(
 async fn save_recording_metadata(
     _logger: Arc<Logger>,
     db: Arc<dyn Db + Send + Sync>,
-    metadata: Part,
+    metadata: UploadMetadata,
 ) -> Result<Uuid, BackendError> {
-    use crate::io;
-
-    let raw_metadata = io::part_as_vec(metadata)
-        .await
-        .map_err(|_| BackendError::MalformedFormSubmission)?;
-    let metadata: UploadMetadata =
-        serde_json::from_slice(&raw_metadata).map_err(BackendError::MalformedUploadMetadata)?;
-
     let new_recording = db.insert(metadata).await?;
     let id = new_recording.id();
 
