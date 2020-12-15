@@ -48,6 +48,7 @@ pub enum Context {
     Formats,
     Genders,
     Hide { id: String },
+    Random { count: i16 },
     Retrieve { id: String },
     Upload { id: Option<String> },
 }
@@ -83,6 +84,10 @@ impl Context {
 
     pub fn hide(id: String) -> Context {
         Context::Hide { id }
+    }
+
+    pub fn random(count: i16) -> Context {
+        Context::Random { count }
     }
 
     pub fn retrieve(id: String) -> Context {
