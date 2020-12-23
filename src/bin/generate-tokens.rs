@@ -10,7 +10,7 @@ use backend::db::PgDb;
 
 #[derive(Debug, StructOpt)]
 #[structopt(
-    name = "generate_tokens",
+    name = "generate-tokens",
     about = "Generate and print tokens for the given recordings"
 )]
 struct Opt {
