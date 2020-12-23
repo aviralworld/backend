@@ -108,6 +108,7 @@ docker:
   script:
     - echo $KANIKO_AUTH_CONFIG > /kaniko/.docker/config.json
     - export build_timestamp=`date +%Y%m%d%H%M%S`
+    - echo $build_timestamp
     - /kaniko/executor --context $CI_PROJECT_DIR --dockerfile $CI_PROJECT_DIR/Dockerfile --cache=true --destination=$CI_REGISTRY_IMAGE:$build_timestamp --destination=$CI_REGISTRY_IMAGE:latest --build-arg RUST_VERSION=$RUST_VERSION --build-arg BACKEND_REVISION=$CI_COMMIT_SHA --build-arg TIMESTAMP=$build_timestamp
   only:
     - master
