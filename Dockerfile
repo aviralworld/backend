@@ -13,10 +13,10 @@ WORKDIR /home/rust/src
 RUN cargo new backend
 WORKDIR /home/rust/src/backend
 COPY Cargo.toml Cargo.lock ./
-RUN OPENSSL_LIB_DIR=/usr/local/musl/lib/ OPENSSL_INCLUDE_DIR=/usr/local/musl/include OPENSSL_STATIC=1 cargo build --target x86_64-unknown-linux-musl --release --locked
+RUN OPENSSL_STATIC=1 cargo build --target x86_64-unknown-linux-musl --release --locked
 
 COPY src ./src
-RUN OPENSSL_LIB_DIR=/usr/local/musl/lib/ OPENSSL_INCLUDE_DIR=/usr/local/musl/include OPENSSL_STATIC=1 cargo build --target x86_64-unknown-linux-musl --release --frozen --offline
+RUN OPENSSL_STATIC=1 cargo build --target x86_64-unknown-linux-musl --release --frozen --offline
 
 FROM mwader/static-ffmpeg:4.3.1 AS ffmpeg
 
