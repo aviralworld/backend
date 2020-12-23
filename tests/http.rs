@@ -49,6 +49,20 @@ struct RetrievalResponse {
 
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
+struct RandomResponse {
+    recordings: Vec<RandomRecording>,
+}
+
+#[derive(Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+struct RandomRecording {
+    id: String,
+    name: String,
+    location: Option<String>,
+}
+
+#[derive(Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 struct RelatedLabel(i16, String);
 
 static SLOG_SCOPE_GUARD: OnceCell<slog_scope::GlobalLoggerGuard> = OnceCell::new();
@@ -87,6 +101,8 @@ async fn api_works() {
     test_deletion(id_to_delete, &id, &ids).await;
 
     test_count().await;
+
+    test_random().await;
 }
 
 async fn test_formats() {
@@ -470,6 +486,27 @@ async fn test_count() {
     assert_eq!(count, 5);
 }
 
+async fn test_random() {
+    use std::collections::HashSet;
+
+    let random_filter = make_random_filter("test_random").await;
+    let response = warp::test::request()
+        .path("/recs/random/10")
+        .method("GET")
+        .reply(&random_filter)
+        .await;
+    assert_eq!(response.status(), 200);
+    let parsed: RandomResponse =
+        serde_json::from_slice(response.body()).expect("deserialize retrieved recording");
+    let recordings = parsed
+        .recordings
+        .into_iter()
+        .map(|r| r.id)
+        .collect::<HashSet<_>>();
+
+    assert_eq!(recordings.len(), 5);
+}
+
 #[tokio::test]
 async fn bad_uploads_fail() {
     use bytes::Bytes;
@@ -583,6 +620,14 @@ async fn make_genders_list_filter<'a>(
     let environment = make_environment(test_name.into()).await;
 
     routes::make_genders_list_route(environment)
+}
+
+async fn make_random_filter<'a>(
+    test_name: impl Into<String>,
+) -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::reject::Rejection> + 'a {
+    let environment = make_environment(test_name.into()).await;
+
+    routes::make_random_route(environment)
 }
 
 fn parse_children_ids(body: &[u8]) -> Vec<String> {

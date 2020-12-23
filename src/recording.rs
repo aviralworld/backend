@@ -13,6 +13,25 @@ pub enum Recording {
     Deleted(DeletedRecording),
 }
 
+/// A minimal version of an active recording in the database.
+#[derive(Clone, Debug, Serialize)]
+pub struct PartialRecording {
+    /// The ID of the recording.
+    id: Uuid,
+
+    /// The name provided.
+    name: String,
+
+    /// The location provided, if any.
+    location: Option<String>,
+}
+
+impl PartialRecording {
+    pub fn new(id: Uuid, name: String, location: Option<String>) -> Self {
+        Self { id, name, location }
+    }
+}
+
 /// A single active recording in the database.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ActiveRecording {

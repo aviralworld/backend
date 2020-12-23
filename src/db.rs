@@ -3,7 +3,7 @@ use url::Url;
 use uuid::Uuid;
 
 use crate::label::Label;
-use crate::recording::{ChildRecording, NewRecording, Recording, UploadMetadata};
+use crate::recording::{ChildRecording, NewRecording, PartialRecording, Recording, UploadMetadata};
 use crate::{audio::format::AudioFormat, errors::BackendError, mime_type::MimeType};
 
 pub trait Db {
@@ -38,6 +38,9 @@ pub trait Db {
         format: &AudioFormat,
     ) -> BoxFuture<Result<Option<MimeType>, BackendError>>;
 
+    fn retrieve_random(&self, count: i16)
+        -> BoxFuture<Result<Vec<PartialRecording>, BackendError>>;
+
     fn release_token(&self, token: &Uuid) -> BoxFuture<Result<(), BackendError>>;
 
     fn remove_token(&self, token: &Uuid) -> BoxFuture<Result<(), BackendError>>;
@@ -65,7 +68,9 @@ mod postgres {
     use uuid::Uuid;
 
     use crate::label::{Id, Label};
-    use crate::recording::{ChildRecording, NewRecording, Recording, Times, UploadMetadata};
+    use crate::recording::{
+        ChildRecording, NewRecording, PartialRecording, Recording, Times, UploadMetadata,
+    };
     use crate::{audio::format::AudioFormat, errors::BackendError, mime_type::MimeType};
 
     static DEFAULT_URL: Option<String> = None;
@@ -146,6 +151,13 @@ mod postgres {
             format: &AudioFormat,
         ) -> BoxFuture<Result<Option<MimeType>, BackendError>> {
             retrieve_mime_type(format.clone(), &self.pool).boxed()
+        }
+
+        fn retrieve_random(
+            &self,
+            count: i16,
+        ) -> BoxFuture<Result<Vec<PartialRecording>, BackendError>> {
+            retrieve_random(count, &self.pool).boxed()
         }
 
         fn update_url(
@@ -382,6 +394,28 @@ mod postgres {
             .map_err(map_sqlx_error)?;
 
         Ok(mime_type)
+    }
+
+    async fn retrieve_random(
+        count: i16,
+        pool: &PgPool,
+    ) -> Result<Vec<PartialRecording>, BackendError> {
+        let query = sqlx::query(include_str!("queries/retrieve_random.sql"));
+
+        let recordings = query
+            .bind(count as i16)
+            .try_map(|row: PgRow| {
+                let id: Uuid = try_get(&row, "id")?;
+                let name: String = try_get(&row, "name")?;
+                let location: Option<String> = try_get(&row, "location")?;
+
+                Ok(PartialRecording::new(id, name, location))
+            })
+            .fetch_all(pool)
+            .await
+            .map_err(map_sqlx_error)?;
+
+        Ok(recordings)
     }
 
     async fn update_url(

@@ -21,15 +21,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let store = Arc::new(S3Store::from_env().expect("initialize S3 store from environment"));
 
     let logger = initialize_logger();
-    let build_timestamp = env::var("BUILD_TIMESTAMP");
-    let revision = env::var("BACKEND_REVISION");
 
-    let version = match (build_timestamp, revision) {
-        (Ok(bt), Ok(r)) => format!(" (r{} built at {})", bt, r),
-        _ => "".to_owned(),
-    };
+    let port: u16 = get_variable("BACKEND_PORT")
+        .parse()
+        .expect("parse BACKEND_PORT as u16");
 
-    info!(logger, "Starting{}...", version);
+    info!(logger, "Starting..."; "port" => port);
     let logger = Arc::new(logger);
 
     let ffprobe_path = get_ffprobe(env::var("BACKEND_FFPROBE_PATH").ok());
@@ -62,6 +59,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let children_route = routes::make_children_route(environment.clone());
     let delete_route = routes::make_delete_route(environment.clone());
     let retrieve_route = routes::make_retrieve_route(environment.clone());
+    let random_route = routes::make_random_route(environment.clone());
 
     let routes = formats_route
         .or(ages_list_route)
@@ -71,12 +69,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .or(upload_route)
         .or(children_route)
         .or(delete_route)
+        .or(random_route)
         .or(retrieve_route);
 
-    let port: u16 = get_variable("BACKEND_PORT")
-        .parse()
-        .expect("parse BACKEND_PORT as u16");
-    warp::serve(routes).run(([127, 0, 0, 1], port)).await;
+    warp::serve(routes).run(([0, 0, 0, 0], port)).await;
 
     Ok(())
 }
@@ -95,6 +91,6 @@ fn initialize_logger() -> slog::Logger {
 
     Logger::root(
         drain,
-        o!("version" => env!("CARGO_PKG_VERSION"), "revision" => option_env!("BACKEND_REVISION")),
+        o!("version" => env!("CARGO_PKG_VERSION"), "revision" => option_env!("BACKEND_REVISION"), "build_timestamp" => env::var("BUILD_TIMESTAMP").unwrap_or_else(|_| "".to_owned())),
     )
 }

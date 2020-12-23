@@ -14,7 +14,7 @@ use warp::Filter;
 use crate::environment::Environment;
 use crate::errors::BackendError;
 use crate::io::parse_upload;
-use crate::recording::{ChildRecording, UploadMetadata};
+use crate::recording::{ChildRecording, PartialRecording, UploadMetadata};
 use crate::{audio::format::AudioFormat, db::Db, environment, mime_type::MimeType};
 
 mod rejection;
@@ -26,11 +26,14 @@ enum SuccessResponse {
         parent: String,
         children: Vec<ChildRecording>,
     },
+    Count(i64),
+    Random {
+        recordings: Vec<PartialRecording>,
+    },
     Upload {
         id: String,
         tokens: Option<Vec<Uuid>>,
     },
-    Count(i64),
 }
 
 /// The maximum form data size to accept. This should be enforced by the HTTP gateway, so on the Rust side it’s set to an unreasonably large number.
@@ -205,6 +208,24 @@ pub fn make_retrieve_route<'a, O: Clone + Send + Sync + 'a>(
                 retrieve_recording(environment.clone(), id).boxed()
             },
         )
+        .recover(move |r| format_rejection(logger.clone(), r))
+}
+
+pub fn make_random_route<'a, O: Clone + Send + Sync + 'a>(
+    environment: Environment<O>,
+) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
+    let logger = environment.logger.clone();
+
+    let recordings_path = environment.urls.recordings_path.clone();
+
+    warp::path(recordings_path)
+        .and(warp::path("random"))
+        .and(warp::path::param::<u8>())
+        .and(warp::path::end())
+        .and(warp::get())
+        .and_then(move |count| -> BoxFuture<Result<Json, reject::Rejection>> {
+            retrieve_random(environment.clone(), count as i16).boxed()
+        })
         .recover(move |r| format_rejection(logger.clone(), r))
 }
 
@@ -468,6 +489,22 @@ async fn retrieve_recording<O: Clone + Send + Sync>(
     }
 }
 
+async fn retrieve_random<O: Clone + Send + Sync>(
+    environment: Environment<O>,
+    count: i16,
+) -> Result<Json, reject::Rejection> {
+    let error_handler =
+        |e: BackendError| rejection::Rejection::new(rejection::Context::random(count), e);
+
+    let recordings = environment
+        .db
+        .retrieve_random(count)
+        .await
+        .map_err(error_handler)?;
+
+    Ok(json(&SuccessResponse::Random { recordings }))
+}
+
 async fn parse_recording_metadata(
     _logger: Arc<Logger>,
     part: Part,
@@ -608,7 +645,7 @@ fn status_code_for(e: &BackendError) -> StatusCode {
     match e {
         BadRequest | TooManyStreams(..) => StatusCode::BAD_REQUEST,
         BackendError::InvalidAudioFormat { .. } => StatusCode::UNSUPPORTED_MEDIA_TYPE,
-        PartsMissing | MalformedUploadMetadata { .. } => StatusCode::BAD_REQUEST,
+        InvalidId { .. } | PartsMissing | MalformedUploadMetadata { .. } => StatusCode::BAD_REQUEST,
         NameAlreadyExists => StatusCode::FORBIDDEN,
         InvalidToken { .. } => StatusCode::UNAUTHORIZED,
         _ => StatusCode::INTERNAL_SERVER_ERROR,

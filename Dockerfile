@@ -23,6 +23,7 @@ FROM mwader/static-ffmpeg:4.3.1 AS ffmpeg
 FROM scratch
 COPY --from=ffmpeg /ffprobe /bin/ffprobe
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+ENV BACKEND_FFPROBE_PATH=/bin/ffprobe
 ENV SSL_CERT_DIR=/etc/ssl/certs/
 COPY --from=builder /home/rust/src/backend/target/x86_64-unknown-linux-musl/release/backend /usr/app/backend
 USER 1000
