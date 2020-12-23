@@ -1,15 +1,15 @@
 use std::env;
 use std::error::Error;
 use std::sync::Arc;
-use std::sync::Mutex;
 
-use slog::{info, Drain};
+use slog::info;
 use warp::Filter;
 
 use backend::audio;
 use backend::config::{get_ffprobe, get_variable};
 use backend::db::PgDb;
 use backend::environment::{Config, Environment};
+use backend::log::initialize_logger;
 use backend::routes;
 use backend::store::S3Store;
 use backend::urls::Urls;
@@ -75,22 +75,4 @@ async fn main() -> Result<(), Box<dyn Error>> {
     warp::serve(routes).run(([0, 0, 0, 0], port)).await;
 
     Ok(())
-}
-
-fn initialize_logger() -> slog::Logger {
-    use slog::{o, Fuse, Logger};
-    use slog_async::Async;
-    use slog_json::Json;
-
-    // TODO is this the correct sequence?
-    let drain = Mutex::new(Json::default(std::io::stderr())).map(Fuse);
-    let drain = Async::new(drain).build().fuse();
-
-    #[cfg(feature = "enable_warp_logging")]
-    pretty_env_logger::init();
-
-    Logger::root(
-        drain,
-        o!("version" => env!("CARGO_PKG_VERSION"), "revision" => option_env!("BACKEND_REVISION"), "build_timestamp" => env::var("BUILD_TIMESTAMP").unwrap_or_else(|_| "".to_owned())),
-    )
 }
