@@ -30,6 +30,10 @@ enum SuccessResponse {
     Random {
         recordings: Vec<PartialRecording>,
     },
+    Token {
+        id: String,
+        parent_id: String,
+    },
     Upload {
         id: String,
         tokens: Option<Vec<Uuid>>,
@@ -226,6 +230,26 @@ pub fn make_random_route<'a, O: Clone + Send + Sync + 'a>(
         .and_then(move |count| -> BoxFuture<Result<Json, reject::Rejection>> {
             retrieve_random(environment.clone(), count as i16).boxed()
         })
+        .recover(move |r| format_rejection(logger.clone(), r))
+}
+
+pub fn make_token_route<'a, O: Clone + Send + Sync + 'a>(
+    environment: Environment<O>,
+) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
+    let logger = environment.logger.clone();
+
+    let recordings_path = environment.urls.recordings_path.clone();
+
+    warp::path(recordings_path)
+        .and(warp::path("token"))
+        .and(warp::path::param::<Uuid>())
+        .and(warp::path::end())
+        .and(warp::get())
+        .and_then(
+            move |id| -> BoxFuture<Result<WithStatus<Json>, reject::Rejection>> {
+                retrieve_token(environment.clone(), id).boxed()
+            },
+        )
         .recover(move |r| format_rejection(logger.clone(), r))
 }
 
@@ -503,6 +527,31 @@ async fn retrieve_random<O: Clone + Send + Sync>(
         .map_err(error_handler)?;
 
     Ok(json(&SuccessResponse::Random { recordings }))
+}
+
+async fn retrieve_token<O: Clone + Send + Sync>(
+    environment: Environment<O>,
+    id: Uuid,
+) -> Result<WithStatus<Json>, reject::Rejection> {
+    let error_handler =
+        |e: BackendError| rejection::Rejection::new(rejection::Context::token(id.to_string()), e);
+
+    let token = environment
+        .db
+        .retrieve_token(&id)
+        .await
+        .map_err(error_handler)?;
+
+    match token {
+        Some(token) => Ok(with_status(
+            json(&SuccessResponse::Token {
+                id: token.id.to_string(),
+                parent_id: token.parent_id.to_string(),
+            }),
+            StatusCode::OK,
+        )),
+        _ => Ok(with_status(json(&()), StatusCode::NOT_FOUND)),
+    }
 }
 
 async fn parse_recording_metadata(
