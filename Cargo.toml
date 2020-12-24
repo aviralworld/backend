@@ -3,12 +3,12 @@ name = "backend"
 version = "2.0.0"
 authors = ["Shiv Jha-Mathur"]
 edition = "2018"
-default-run = "main"
+default-run = "backend"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [[bin]]
-name = "main"
+name = "backend"
 path = "src/main.rs"
 
 [[bin]]
