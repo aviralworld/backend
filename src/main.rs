@@ -60,6 +60,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let delete_route = routes::make_delete_route(environment.clone());
     let retrieve_route = routes::make_retrieve_route(environment.clone());
     let random_route = routes::make_random_route(environment.clone());
+    let token_route = routes::make_token_route(environment.clone());
 
     let routes = formats_route
         .or(ages_list_route)
@@ -70,7 +71,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .or(children_route)
         .or(delete_route)
         .or(random_route)
-        .or(retrieve_route);
+        .or(retrieve_route)
+        .or(token_route);
 
     warp::serve(routes).run(([0, 0, 0, 0], port)).await;
 

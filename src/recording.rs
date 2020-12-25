@@ -223,3 +223,19 @@ pub struct Times {
     #[serde(with = "time::serde::timestamp")]
     pub(crate) updated_at: OffsetDateTime,
 }
+
+/// A token to create a new recording.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct RecordingToken {
+    /// The ID of the token.
+    pub(crate) id: Uuid,
+
+    /// The ID of the parent recording.
+    pub(crate) parent_id: Uuid,
+}
+
+impl RecordingToken {
+    pub fn new(id: Uuid, parent_id: Uuid) -> Self {
+        Self { id, parent_id }
+    }
+}

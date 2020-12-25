@@ -3,7 +3,9 @@ use url::Url;
 use uuid::Uuid;
 
 use crate::label::Label;
-use crate::recording::{ChildRecording, NewRecording, PartialRecording, Recording, UploadMetadata};
+use crate::recording::{
+    ChildRecording, NewRecording, PartialRecording, Recording, RecordingToken, UploadMetadata,
+};
 use crate::{audio::format::AudioFormat, errors::BackendError, mime_type::MimeType};
 
 pub trait Db {
@@ -45,6 +47,11 @@ pub trait Db {
 
     fn remove_token(&self, token: &Uuid) -> BoxFuture<Result<(), BackendError>>;
 
+    fn retrieve_token(
+        &self,
+        token: &Uuid,
+    ) -> BoxFuture<Result<Option<RecordingToken>, BackendError>>;
+
     fn update_url(
         &self,
         id: &Uuid,
@@ -69,7 +76,8 @@ mod postgres {
 
     use crate::label::{Id, Label};
     use crate::recording::{
-        ChildRecording, NewRecording, PartialRecording, Recording, Times, UploadMetadata,
+        ChildRecording, NewRecording, PartialRecording, Recording, RecordingToken, Times,
+        UploadMetadata,
     };
     use crate::{audio::format::AudioFormat, errors::BackendError, mime_type::MimeType};
 
@@ -158,6 +166,13 @@ mod postgres {
             count: i16,
         ) -> BoxFuture<Result<Vec<PartialRecording>, BackendError>> {
             retrieve_random(count, &self.pool).boxed()
+        }
+
+        fn retrieve_token(
+            &self,
+            token: &Uuid,
+        ) -> BoxFuture<Result<Option<RecordingToken>, BackendError>> {
+            retrieve_token(*token, &self.pool).boxed()
         }
 
         fn update_url(
@@ -416,6 +431,27 @@ mod postgres {
             .map_err(map_sqlx_error)?;
 
         Ok(recordings)
+    }
+
+    async fn retrieve_token(
+        token: Uuid,
+        pool: &PgPool,
+    ) -> Result<Option<RecordingToken>, BackendError> {
+        let query = sqlx::query(include_str!("queries/retrieve_token.sql"));
+
+        let result: Option<RecordingToken> = query
+            .bind(token)
+            .try_map(|row: PgRow| {
+                let id: Uuid = try_get(&row, "id")?;
+                let parent_id: Uuid = try_get(&row, "parent_id")?;
+
+                Ok(RecordingToken::new(id, parent_id))
+            })
+            .fetch_optional(pool)
+            .await
+            .map_err(map_sqlx_error)?;
+
+        Ok(result)
     }
 
     async fn update_url(

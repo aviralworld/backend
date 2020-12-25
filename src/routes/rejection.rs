@@ -50,6 +50,7 @@ pub enum Context {
     Hide { id: String },
     Random { count: i16 },
     Retrieve { id: String },
+    Token { id: String },
     Upload { id: Option<String> },
 }
 
@@ -92,6 +93,10 @@ impl Context {
 
     pub fn retrieve(id: String) -> Context {
         Context::Retrieve { id }
+    }
+
+    pub fn token(id: String) -> Context {
+        Context::Token { id }
     }
 
     pub fn upload(id: Option<String>) -> Context {

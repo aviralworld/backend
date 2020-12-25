@@ -55,6 +55,13 @@ struct RandomResponse {
 
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
+struct TokenResponse {
+    id: String,
+    parent_id: String,
+}
+
+#[derive(Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 struct RandomRecording {
     id: String,
     name: String,
@@ -95,14 +102,25 @@ async fn api_works() {
     )
     .expect("parse simple_metadata_children.json");
 
-    let ids = test_uploading_children(&file_path, &content_type, &id, tokens, children).await;
+    let results = test_uploading_children(&file_path, &content_type, &id, tokens, children).await;
 
-    let id_to_delete = ids.get(2).expect("get third child ID");
-    test_deletion(id_to_delete, &id, &ids).await;
+    let id_to_delete = results[2].0.to_owned();
+    test_deletion(
+        &id_to_delete,
+        &id,
+        &results
+            .iter()
+            .map(|(id, _)| id.to_owned())
+            .collect::<Vec<_>>(),
+    )
+    .await;
 
     test_count().await;
 
     test_random().await;
+
+    let (id, tokens) = results[0].to_owned();
+    test_token(tokens[0].to_owned(), id).await;
 }
 
 async fn test_formats() {
@@ -337,14 +355,14 @@ async fn test_uploading_children(
     parent: &str,
     mut tokens: Vec<String>,
     mut children: serde_json::Value,
-) -> Vec<String> {
-    let mut ids = vec![];
+) -> Vec<(String, Vec<String>)> {
+    let mut results = vec![];
 
     for mut child in children
         .as_array_mut()
         .expect("get array from simple_metadata_children.json")
     {
-        let child_id = test_uploading_child(
+        let result = test_uploading_child(
             file_path.as_ref(),
             content_type.as_ref(),
             tokens.pop().unwrap(),
@@ -352,8 +370,8 @@ async fn test_uploading_children(
         )
         .await;
 
-        if let Some(id) = child_id {
-            ids.push(id);
+        if let Some((id, tokens)) = result {
+            results.push((id, tokens));
         }
     }
 
@@ -368,10 +386,13 @@ async fn test_uploading_children(
         assert_eq!(request.status(), StatusCode::OK);
 
         let returned_ids = parse_children_ids(request.body());
-        assert_eq!(ids, returned_ids);
+        assert_eq!(
+            results.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>(),
+            returned_ids
+        );
     }
 
-    ids
+    results
 }
 
 async fn test_uploading_child(
@@ -379,7 +400,7 @@ async fn test_uploading_child(
     content_type: impl AsRef<str>,
     token: String,
     child: &mut serde_json::Value,
-) -> Option<String> {
+) -> Option<(String, Vec<String>)> {
     let filter = make_upload_filter("test_uploading_child").await;
     let object = child.as_object_mut().expect("get child as object");
     object.insert("token".to_owned(), serde_json::json!(token));
@@ -397,12 +418,12 @@ async fn test_uploading_child(
     assert_eq!(response.status(), StatusCode::CREATED);
     let body = String::from_utf8_lossy(response.body()).into_owned();
 
-    let id = serde_json::from_str::<CreationResponse>(&body)
-        .expect("parse response as JSON")
-        .id
-        .unwrap();
+    let response = serde_json::from_str::<CreationResponse>(&body).expect("parse response as JSON");
 
-    Some(id)
+    let id = response.id.unwrap();
+    let tokens = response.tokens.unwrap();
+
+    Some((id, tokens))
 }
 
 async fn test_deletion(id_to_delete: &str, parent: &str, ids: &[String]) {
@@ -505,6 +526,36 @@ async fn test_random() {
         .collect::<HashSet<_>>();
 
     assert_eq!(recordings.len(), 5);
+}
+
+async fn test_token(token_id: String, parent_id: String) {
+    use uuid::Uuid;
+
+    let token_filter = make_token_filter("test_token_parent").await;
+
+    {
+        let uuid = Uuid::new_v4();
+        let response = warp::test::request()
+            .path(&format!("/recs/token/{}/", uuid))
+            .method("GET")
+            .reply(&token_filter)
+            .await;
+        assert_eq!(response.status(), 404);
+    }
+
+    {
+        let response = warp::test::request()
+            .path(&format!("/recs/token/{}/", token_id))
+            .method("GET")
+            .reply(&token_filter)
+            .await;
+        assert_eq!(response.status(), 200);
+
+        let parsed: TokenResponse =
+            serde_json::from_slice(response.body()).expect("deserialize token response");
+
+        assert_eq!(parsed.parent_id, parent_id);
+    }
 }
 
 #[tokio::test]
@@ -628,6 +679,14 @@ async fn make_random_filter<'a>(
     let environment = make_environment(test_name.into()).await;
 
     routes::make_random_route(environment)
+}
+
+async fn make_token_filter<'a>(
+    test_name: impl Into<String>,
+) -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::reject::Rejection> + 'a {
+    let environment = make_environment(test_name.into()).await;
+
+    routes::make_token_route(environment)
 }
 
 fn parse_children_ids(body: &[u8]) -> Vec<String> {
