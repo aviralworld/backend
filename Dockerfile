@@ -8,6 +8,7 @@ ARG REVISION
 ENV BACKEND_REVISION=$REVISION
 
 ENV CARGO_INCREMENTAL=0
+ENV OPENSSL_STATIC=1
 
 ENV USER=rust
 
@@ -17,11 +18,11 @@ WORKDIR /home/rust/src/backend
 
 # build dependencies
 COPY Cargo.toml Cargo.lock ./
-RUN OPENSSL_STATIC=1 cargo build --target x86_64-unknown-linux-musl --release --locked
+RUN cargo build --target x86_64-unknown-linux-musl --release --locked
 
 # build project
 COPY src ./src
-RUN OPENSSL_STATIC=1 cargo build --target x86_64-unknown-linux-musl --release --frozen --offline
+RUN cargo build --target x86_64-unknown-linux-musl --release --frozen --offline
 
 FROM mwader/static-ffmpeg:4.3.1 AS ffmpeg
 
@@ -30,6 +31,7 @@ FROM scratch
 ARG TIMESTAMP
 ARG REVISION
 LABEL timestamp=$TIMESTAMP revision=$REVISION
+
 COPY --from=ffmpeg /ffprobe /bin/ffprobe
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 ENV BACKEND_FFPROBE_PATH=/bin/ffprobe
