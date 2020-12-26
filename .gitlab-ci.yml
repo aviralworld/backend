@@ -110,6 +110,6 @@ docker:
     - export build_timestamp=`date +%Y%m%d%H%M%S`
     - export tag="v$build_timestamp"
     - echo $tag
-    - /kaniko/executor --context $CI_PROJECT_DIR --dockerfile $CI_PROJECT_DIR/Dockerfile --cache=true --destination=$CI_REGISTRY_IMAGE:$tag --destination=$CI_REGISTRY_IMAGE:latest --build-arg RUST_VERSION=$RUST_VERSION --build-arg BACKEND_REVISION=$CI_COMMIT_SHA --build-arg TIMESTAMP=$build_timestamp
+    - /kaniko/executor --context $CI_PROJECT_DIR --dockerfile $CI_PROJECT_DIR/Dockerfile --cache=true --destination=$CI_REGISTRY_IMAGE:$tag --destination=$CI_REGISTRY_IMAGE:latest --build-arg RUST_VERSION=$RUST_VERSION --build-arg REVISION=$CI_COMMIT_SHA --build-arg TIMESTAMP=$build_timestamp
   only:
     - master
