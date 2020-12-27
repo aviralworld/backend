@@ -17,12 +17,17 @@ RUN cargo new backend
 WORKDIR /home/rust/src/backend
 
 # build dependencies
-COPY Cargo.toml Cargo.lock ./
-RUN cargo build --target x86_64-unknown-linux-musl --release --locked
+RUN cargo new initdb && cargo new server
+
+COPY Cargo.lock Cargo.toml ./
+
+COPY server/Cargo.toml server/Cargo.toml
+COPY initdb/Cargo.toml initdb/Cargo.toml
+RUN cargo build -p backend --target x86_64-unknown-linux-musl --release --locked
 
 # build project
-COPY src ./src
-RUN cargo build --target x86_64-unknown-linux-musl --bin backend --release --frozen --offline
+COPY server ./server
+RUN cargo build -p backend --target x86_64-unknown-linux-musl --bin backend --release --frozen --offline
 
 FROM mwader/static-ffmpeg:4.3.1 AS ffmpeg
 
