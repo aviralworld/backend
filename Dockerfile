@@ -22,7 +22,7 @@ RUN cargo build --target x86_64-unknown-linux-musl --release --locked
 
 # build project
 COPY src ./src
-RUN cargo build --target x86_64-unknown-linux-musl --release --frozen --offline
+RUN cargo build --target x86_64-unknown-linux-musl --bin backend --release --frozen --offline
 
 FROM mwader/static-ffmpeg:4.3.1 AS ffmpeg
 
