@@ -838,6 +838,9 @@ fn initialize_db_for_test(connection_string: &str) {
         .expect("create postgres::Client from BACKEND_DB_CONNECTION_STRING");
     let mut movine = Movine::new(&mut client);
 
+    movine.set_migration_dir("../migrations");
+    movine.set_strict(true);
+
     if movine.status().is_err() {
         movine.initialize().expect("initialize movine");
     }
