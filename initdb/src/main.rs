@@ -1,47 +1,55 @@
 use std::env;
-use std::thread::sleep;
-use std::time::Duration;
+use std::error::Error;
 
 use movine::Movine;
 use postgres::{Client, NoTls};
+use warp::http::StatusCode;
+use warp::reply::{json, with_status, Json, WithStatus};
+use warp::Filter;
 
-fn main() {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
+    let port: u16 = env::var("INITDB_PORT")
+        .expect("read INITDB_PORT")
+        .parse()
+        .expect("parse INITDB_PORT");
+    let route = warp::post().and_then(initialize_db);
+
+    warp::serve(route).run(([0, 0, 0, 0], port)).await;
+
+    Ok(())
+}
+
+async fn initialize_db() -> Result<WithStatus<Json>, warp::reject::Rejection> {
+    use warp::reject::custom;
+
     let connection_string =
         env::var("BACKEND_DB_CONNECTION_STRING").expect("read BACKEND_DB_CONNECTION_STRING");
 
-    let keep_trying = env::var("BACKEND_INITDB_KEEP_TRYING").unwrap_or(String::new()) == "1";
-    let ms_between_attempts: u32 = env::var("BACKEND_INITDB_DELAY")
-        .expect("retrieve BACKEND_INITDB_DELAY")
-        .parse()
-        .expect("parse BACKEND_INITDB_DELAY as u32");
-    let delay = Duration::from_millis(ms_between_attempts as u64);
+    let result = Client::connect(&connection_string, NoTls);
 
-    let mut attempt = 1;
-
-    loop {
-        let result = Client::connect(&connection_string, NoTls);
-
-        if let Ok(client) = result {
+    match result {
+        Ok(client) => {
             let mut movine = Movine::new(client);
             movine.set_migration_dir("../migrations");
 
             if movine.status().is_err() {
-                movine.initialize().expect("initialize movine");
+                movine
+                    .initialize()
+                    .map_err(|_| custom(Failure("failed to initialize movine".to_string())))?;
             }
 
-            movine.up().expect("run movine migrations");
-            break;
-        }
+            movine
+                .up()
+                .map_err(|_| custom(Failure("failed to run migrations".to_string())))?;
 
-        if keep_trying {
-            attempt += 1;
-            println!(
-                "Sleeping {} milliseconds before attempt #{}...",
-                ms_between_attempts, attempt
-            );
-            sleep(delay);
-        } else {
-            break;
+            Ok(with_status(json(&()), StatusCode::NO_CONTENT))
         }
+        Err(e) => Err(custom(Failure(e.to_string()))),
     }
 }
+
+#[derive(Debug)]
+struct Failure(String);
+
+impl warp::reject::Reject for Failure {}
