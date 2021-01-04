@@ -95,7 +95,7 @@ impl Store for S3Store {
         delete(self, *key).boxed()
     }
 
-    fn get_url<'a>(&self, key: &'a Uuid) -> Result<Url, ParseError> {
+    fn get_url(&self, key: &Uuid) -> Result<Url, ParseError> {
         self.base_url.join(&key.to_string())
     }
 
