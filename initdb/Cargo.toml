@@ -11,3 +11,8 @@ movine = "0.10.0"
 postgres = "0.17.0"
 warp = "0.2.3"
 tokio = { version = "0.2.21", features = [ "macros" ] }
+serde = { version = "1.0.110", features = ["derive"] }
+serde_derive = "1.0.110"
+backend = { path = "../server" }
+futures = "0.3.8"
+dotenv = "0.15.0"

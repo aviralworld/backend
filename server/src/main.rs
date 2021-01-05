@@ -22,11 +22,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let logger = initialize_logger();
 
-    let port: u16 = get_variable("BACKEND_PORT")
+    let main_port: u16 = get_variable("BACKEND_PORT")
         .parse()
         .expect("parse BACKEND_PORT as u16");
+    let admin_port: u16 = get_variable("BACKEND_ADMIN_PORT")
+        .parse()
+        .expect("parse BACKEND_ADMIN_PORT as u16");
 
-    info!(logger, "Starting..."; "port" => port);
+    info!(logger, "Starting..."; "main_port" => main_port, "admin_port" => admin_port);
     let logger = Arc::new(logger);
 
     let ffprobe_path = get_ffprobe(env::var("BACKEND_FFPROBE_PATH").ok());
@@ -74,7 +77,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .or(retrieve_route)
         .or(token_route);
 
-    warp::serve(routes).run(([0, 0, 0, 0], port)).await;
+    let main_server = warp::serve(routes).run(([0, 0, 0, 0], main_port));
+
+    let healthz_route = routes::make_healthz_route(environment.clone());
+
+    let admin_server = warp::serve(healthz_route).run(([0, 0, 0, 0], admin_port));
+
+    futures::future::join(main_server, admin_server).await;
 
     Ok(())
 }
