@@ -27,8 +27,11 @@ async fn initialize_db() -> Result<WithStatus<Json>, warp::reject::Rejection> {
     use warp::reject::custom;
 
     task::block_in_place(|| {
-        let connection_string =
-            env::var("BACKEND_DB_CONNECTION_STRING").expect("read BACKEND_DB_CONNECTION_STRING");
+        let connection_string = env::var("BACKEND_DB_CONNECTION_STRING").map_err(|_| {
+            custom(Failure(
+                "could not read BACKEND_DB_CONNECTION_STRING".to_string(),
+            ))
+        })?;
 
         let result = Client::connect(&connection_string, NoTls);
 
