@@ -3,6 +3,7 @@ pub mod config;
 pub mod db;
 pub mod environment;
 pub mod errors;
+pub mod info;
 pub mod io;
 pub mod label;
 pub mod log;
