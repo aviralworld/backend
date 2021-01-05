@@ -21,12 +21,17 @@ mod rejection;
 
 #[derive(Debug, Serialize)]
 #[serde(untagged)]
-enum SuccessResponse {
+enum SuccessResponse<'a> {
     Children {
         parent: String,
         children: Vec<ChildRecording>,
     },
     Count(i64),
+    Healthz {
+        revision: Option<&'a str>,
+        timestamp: Option<&'a str>,
+        version: &'a str,
+    },
     Random {
         recordings: Vec<PartialRecording>,
     },
@@ -248,6 +253,21 @@ pub fn make_token_route<'a, O: Clone + Send + Sync + 'a>(
         .and_then(
             move |id| -> BoxFuture<Result<WithStatus<Json>, reject::Rejection>> {
                 retrieve_token(environment.clone(), id).boxed()
+            },
+        )
+        .recover(move |r| format_rejection(logger.clone(), r))
+}
+
+pub fn make_healthz_route<'a, O: Clone + Send + Sync + 'a>(
+    environment: Environment<O>,
+) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
+    let logger = environment.logger.clone();
+
+    warp::path("healthz")
+        .and(warp::get())
+        .and_then(
+            move || -> BoxFuture<Result<Json, std::convert::Infallible>> {
+                check_health(environment.clone()).boxed()
             },
         )
         .recover(move |r| format_rejection(logger.clone(), r))
@@ -552,6 +572,18 @@ async fn retrieve_token<O: Clone + Send + Sync>(
         )),
         _ => Ok(with_status(json(&()), StatusCode::NOT_FOUND)),
     }
+}
+
+async fn check_health<O: Clone + Send + Sync>(
+    _environment: Environment<O>,
+) -> Result<Json, std::convert::Infallible> {
+    use crate::info;
+
+    Ok(json(&SuccessResponse::Healthz {
+        revision: info::REVISION,
+        timestamp: info::BUILD_TIMESTAMP,
+        version: info::VERSION,
+    }))
 }
 
 async fn parse_recording_metadata(

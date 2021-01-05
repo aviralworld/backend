@@ -5,6 +5,8 @@ use slog::{o, Fuse, Logger};
 use slog_async::Async;
 use slog_json::Json;
 
+use crate::info;
+
 pub fn initialize_logger() -> slog::Logger {
     // TODO is this the correct sequence?
     let drain = Mutex::new(Json::default(std::io::stderr())).map(Fuse);
@@ -15,6 +17,6 @@ pub fn initialize_logger() -> slog::Logger {
 
     Logger::root(
         drain,
-        o!("version" => env!("CARGO_PKG_VERSION"), "revision" => option_env!("BACKEND_REVISION"), "build_timestamp" => option_env!("BUILD_TIMESTAMP").unwrap_or_else(|| "")),
+        o!("version" => info::VERSION, "revision" => info::REVISION, "build_timestamp" => info::BUILD_TIMESTAMP),
     )
 }
