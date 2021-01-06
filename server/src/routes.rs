@@ -577,8 +577,6 @@ async fn retrieve_token<O: Clone + Send + Sync>(
 async fn check_health<O: Clone + Send + Sync>(
     _environment: Environment<O>,
 ) -> Result<Json, std::convert::Infallible> {
-    use crate::info;
-
     Ok(json(&SuccessResponse::Healthz {
         revision: info::REVISION,
         timestamp: info::BUILD_TIMESTAMP,

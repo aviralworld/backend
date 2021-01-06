@@ -5,8 +5,6 @@ use slog::{o, Fuse, Logger};
 use slog_async::Async;
 use slog_json::Json;
 
-use crate::info;
-
 pub fn initialize_logger() -> slog::Logger {
     // TODO is this the correct sequence?
     let drain = Mutex::new(Json::default(std::io::stderr())).map(Fuse);

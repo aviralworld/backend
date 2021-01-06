@@ -120,6 +120,7 @@ dependencies = [
  "dotenv",
  "ffmpeg-next",
  "futures",
+ "info",
  "lazy_static",
  "mime",
  "movine 0.8.2",
@@ -1000,12 +1001,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "info"
+version = "0.1.0"
+
+[[package]]
 name = "initdb"
 version = "0.1.0"
 dependencies = [
- "backend",
  "dotenv",
  "futures",
+ "info",
  "movine 0.10.0",
  "postgres",
  "serde",

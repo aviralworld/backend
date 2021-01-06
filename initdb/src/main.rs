@@ -74,8 +74,6 @@ async fn initialize_db() -> Result<WithStatus<Json>, warp::reject::Rejection> {
 }
 
 async fn health_check() -> Result<Json, Infallible> {
-    use backend::info;
-
     Ok(json(
         &(HealthCheck {
             revision: info::REVISION,
