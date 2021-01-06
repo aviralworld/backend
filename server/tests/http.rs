@@ -7,7 +7,7 @@ use std::sync::Once;
 use lazy_static::lazy_static;
 use once_cell::sync::OnceCell;
 use serde::Deserialize;
-use slog::{self, o, Logger};
+use log::{self, o, Logger};
 use url::Url;
 use warp::http::StatusCode;
 

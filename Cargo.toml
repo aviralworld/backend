@@ -2,6 +2,7 @@
 members = [
         "info",
         "initdb",
+        "log",
         "server",
 ]
 

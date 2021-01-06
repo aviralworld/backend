@@ -1,7 +1,7 @@
 use std::error::Error;
 
 use dotenv::dotenv;
-use slog::{debug, info};
+use log::{debug, info};
 use structopt::StructOpt;
 use uuid::Uuid;
 
@@ -46,7 +46,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut tokens = vec![];
 
     for id in &ids {
-        let logger = logger.new(slog::o!("id" => format!("{}", id)));
+        let logger = logger.new(log::o!("id" => format!("{}", id)));
         info!(logger, "Generating tokens for recording {}...", id);
 
         for number in 1..=tokens_per_recording {
@@ -72,9 +72,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn initialize_logger() -> slog::Logger {
-    use slog::Drain;
-    use slog::{o, Fuse, Logger};
+fn initialize_logger() -> log::Logger {
+    use log::Drain;
+    use log::{o, Fuse, Logger};
     use slog_json::Json;
     use std::sync::Mutex;
 

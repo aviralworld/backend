@@ -17,15 +17,19 @@ RUN cargo new backend
 WORKDIR /home/rust/src/backend
 
 # build dependencies
-RUN cargo new initdb && cargo new server
+RUN cargo new --lib info && cargo new initdb && cargo new --lib log && cargo new server
 
 COPY Cargo.lock Cargo.toml ./
 
-COPY server/Cargo.toml server/Cargo.toml
+COPY info/Cargo.toml info/Cargo.toml
 COPY initdb/Cargo.toml initdb/Cargo.toml
+COPY log/Cargo.toml log/Cargo.toml
+COPY server/Cargo.toml server/Cargo.toml
 RUN cargo build -p backend --target x86_64-unknown-linux-musl --release --locked
 
 # build project
+COPY info ./info
+COPY log ./log
 COPY server ./server
 RUN cargo build -p backend --target x86_64-unknown-linux-musl --bin backend --release --frozen --offline
 
