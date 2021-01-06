@@ -27,6 +27,7 @@ RUN cargo build -p initdb --target x86_64-unknown-linux-musl --release --locked
 
 # build project
 COPY initdb ./initdb
+COPY server ./server
 RUN cargo build -p initdb --target x86_64-unknown-linux-musl --bin initdb --release --frozen --offline
 
 FROM scratch
