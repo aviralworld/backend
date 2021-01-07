@@ -1009,6 +1009,7 @@ dependencies = [
  "dotenv",
  "futures",
  "info",
+ "log 0.1.0",
  "movine 0.10.0",
  "postgres",
  "serde",
