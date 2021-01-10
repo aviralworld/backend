@@ -17,6 +17,7 @@ FROM postgres:$POSTGRES_VERSION
 COPY migrations /usr/app/migrations
 COPY --from=builder /home/rust/src/backend/target/x86_64-unknown-linux-musl/release/initdb /usr/app/initdb
 COPY tools/entrypoint.sh /usr/local/bin/custom-entrypoint.sh
+RUN chmod 755 /usr/local/bin/custom-entrypoint.sh
 
 ARG TIMESTAMP
 ARG REVISION
