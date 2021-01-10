@@ -1,0 +1,27 @@
+ARG RUST_VERSION
+
+FROM ekidd/rust-musl-builder:$RUST_VERSION AS builder
+
+ARG TIMESTAMP
+ARG REVISION
+
+LABEL timestamp=$TIMESTAMP revision=$REVISION
+
+ENV OPENSSL_STATIC=1
+
+ENV USER=rust
+
+WORKDIR /home/rust/src
+RUN cargo new backend
+WORKDIR /home/rust/src/backend
+
+# build dependencies
+RUN cargo new --lib info && cargo new initdb && cargo new --lib log && cargo new server
+
+COPY --chown=rust Cargo.lock Cargo.toml ./
+
+COPY --chown=rust info/Cargo.toml info/Cargo.toml
+COPY --chown=rust initdb/Cargo.toml initdb/Cargo.toml
+COPY --chown=rust log/Cargo.toml log/Cargo.toml
+COPY --chown=rust server/Cargo.toml server/Cargo.toml
+RUN cargo build --target x86_64-unknown-linux-musl --bin backend --release --locked
