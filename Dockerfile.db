@@ -1,4 +1,5 @@
 ARG BASE_IMAGE
+ARG POSTGRES_VERSION
 
 FROM $BASE_IMAGE AS builder
 
@@ -11,15 +12,14 @@ COPY --chown=rust log ./log
 # without the `touch`, the compiler doesn't appear to realize the code has changed
 RUN touch info/src/lib.rs && touch log/src/lib.rs && cargo build -p initdb --target x86_64-unknown-linux-musl --bin initdb --release --frozen --offline
 
-FROM scratch
+FROM postgres:$POSTGRES_VERSION
+
+COPY migrations /usr/app/migrations
+COPY --from=builder /home/rust/src/backend/target/x86_64-unknown-linux-musl/release/initdb /usr/app/initdb
+COPY tools/entrypoint.sh /usr/local/bin/custom-entrypoint.sh
 
 ARG TIMESTAMP
 ARG REVISION
 LABEL timestamp=$TIMESTAMP revision=$REVISION
 
-COPY migrations migrations
-COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
-ENV SSL_CERT_DIR=/etc/ssl/certs/
-COPY --from=builder /home/rust/src/backend/target/x86_64-unknown-linux-musl/release/initdb /usr/app/initdb
-USER 1000
-CMD ["/usr/app/initdb"]
+ENTRYPOINT ["/usr/local/bin/custom-entrypoint.sh"]

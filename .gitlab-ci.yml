@@ -1,6 +1,7 @@
 variables:
   CARGO_INCREMENTAL: 0
   RUST_VERSION: 1.49.0
+  POSTGRES_VERSION: 12
   KANIKO_AUTH_CONFIG: >-
       {
         "auths": {
@@ -131,7 +132,7 @@ docker:
     - master
   interruptible: yes
 
-docker-initdb:
+docker-db:
   stage: docker
   image:
     name: gcr.io/kaniko-project/executor:debug
@@ -143,7 +144,7 @@ docker-initdb:
     - export build_timestamp=`date +%Y%m%d%H%M%S`
     - export tag=`echo $(cat .gitlab-ci-timestamp)`
     - echo $tag
-    - /kaniko/executor --context $CI_PROJECT_DIR --dockerfile $CI_PROJECT_DIR/Dockerfile.initdb --cache=true --destination=$CI_REGISTRY_IMAGE/initdb:$tag --destination=$CI_REGISTRY_IMAGE/initdb:latest --build-arg BASE_IMAGE=$CI_REGISTRY_IMAGE/base:$tag --build-arg REVISION=$CI_COMMIT_SHA --build-arg TIMESTAMP=$build_timestamp
+    - /kaniko/executor --context $CI_PROJECT_DIR --dockerfile $CI_PROJECT_DIR/Dockerfile.db --cache=true --destination=$CI_REGISTRY_IMAGE/db:$tag --destination=$CI_REGISTRY_IMAGE/db:latest --build-arg BASE_IMAGE=$CI_REGISTRY_IMAGE/base:$tag --build-arg REVISION=$CI_COMMIT_SHA --build-arg POSTGRES_VERSION=12 --build-arg TIMESTAMP=$build_timestamp
   only:
     - master
   interruptible: yes
