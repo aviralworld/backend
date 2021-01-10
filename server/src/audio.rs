@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use slog::Logger;
+use log::Logger;
 
 use crate::errors::BackendError;
 
@@ -31,8 +31,8 @@ mod inner {
     use std::sync::Arc;
 
     use lazy_static::lazy_static;
+    use log::Logger;
     use serde::Deserialize;
-    use slog::Logger;
 
     use crate::audio::format::AudioFormat;
     use crate::errors::BackendError;

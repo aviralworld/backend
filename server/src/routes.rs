@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use futures::future::{BoxFuture, FutureExt};
+use log::{debug, error, trace, Logger};
 use serde::Serialize;
-use slog::{debug, error, trace, Logger};
 use url::Url;
 use uuid::Uuid;
 use warp::filters::multipart::{form, FormData, Part};
@@ -339,7 +339,7 @@ async fn process_upload<O: Clone + Send + Sync>(
     environment: Environment<O>,
     content: FormData,
 ) -> Result<WithHeader<WithStatus<Json>>, reject::Rejection> {
-    use slog::o;
+    use log::o;
 
     let Environment {
         logger,
@@ -577,8 +577,6 @@ async fn retrieve_token<O: Clone + Send + Sync>(
 async fn check_health<O: Clone + Send + Sync>(
     _environment: Environment<O>,
 ) -> Result<Json, std::convert::Infallible> {
-    use crate::info;
-
     Ok(json(&SuccessResponse::Healthz {
         revision: info::REVISION,
         timestamp: info::BUILD_TIMESTAMP,

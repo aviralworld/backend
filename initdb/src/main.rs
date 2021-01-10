@@ -3,6 +3,7 @@
 use std::convert::Infallible;
 use std::env;
 use std::error::Error;
+use std::sync::Arc;
 
 use movine::Movine;
 use postgres::{Client, NoTls};
@@ -11,6 +12,8 @@ use tokio::task;
 use warp::http::StatusCode;
 use warp::reply::{json, with_status, Json, WithStatus};
 use warp::Filter;
+
+use log::{debug, info, initialize_logger, Logger};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -25,7 +28,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .parse()
         .expect("parse INITDB_ADMIN_PORT");
 
-    let initialize_db_route = warp::post().and_then(initialize_db);
+    let logger = Arc::new(initialize_logger());
+    info!(logger, "Starting..."; "port" => main_port, "admin_port" => admin_port);
+
+    let logger = logger.clone();
+    let initialize_db_route = warp::post().and_then(move || {
+        let logger = logger.clone();
+        initialize_db(logger)
+    });
     let main_server = warp::serve(initialize_db_route).run(([0, 0, 0, 0], main_port));
 
     let health_check_route = warp::get()
@@ -38,15 +48,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-async fn initialize_db() -> Result<WithStatus<Json>, warp::reject::Rejection> {
+async fn initialize_db(logger: Arc<Logger>) -> Result<WithStatus<Json>, warp::reject::Rejection> {
     use warp::reject::custom;
 
-    task::block_in_place(|| {
+    info!(logger, "Initializing DB...");
+
+    task::block_in_place(move || {
         let connection_string = env::var("BACKEND_DB_CONNECTION_STRING").map_err(|_| {
             custom(Failure(
                 "could not read BACKEND_DB_CONNECTION_STRING".to_string(),
             ))
         })?;
+
+        debug!(logger, "Connecting to database...");
 
         let result = Client::connect(&connection_string, NoTls);
 
@@ -56,15 +70,18 @@ async fn initialize_db() -> Result<WithStatus<Json>, warp::reject::Rejection> {
                 movine.set_migration_dir("./migrations");
 
                 if movine.status().is_err() {
+                    debug!(logger, "Initializing movine...");
                     movine
                         .initialize()
                         .map_err(|_| custom(Failure("failed to initialize movine".to_string())))?;
                 }
 
+                debug!(logger, "Running migrations...");
                 movine
                     .up()
                     .map_err(|_| custom(Failure("failed to run migrations".to_string())))?;
 
+                debug!(logger, "Completed initialization.");
                 Ok(with_status(json(&()), StatusCode::NO_CONTENT))
             }
             Err(e) => Err(custom(Failure(e.to_string()))),
@@ -74,8 +91,6 @@ async fn initialize_db() -> Result<WithStatus<Json>, warp::reject::Rejection> {
 }
 
 async fn health_check() -> Result<Json, Infallible> {
-    use backend::info;
-
     Ok(json(
         &(HealthCheck {
             revision: info::REVISION,

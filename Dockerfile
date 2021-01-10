@@ -1,33 +1,16 @@
-ARG RUST_VERSION
+ARG BASE_IMAGE
 
-FROM ekidd/rust-musl-builder:$RUST_VERSION AS builder
+FROM $BASE_IMAGE AS builder
 
-ARG TIMESTAMP
-ENV BUILD_TIMESTAMP=$TIMESTAMP
-ARG REVISION
-ENV BACKEND_REVISION=$REVISION
-
-ENV CARGO_INCREMENTAL=0
-ENV OPENSSL_STATIC=1
-
-ENV USER=rust
-
-WORKDIR /home/rust/src
-RUN cargo new backend
 WORKDIR /home/rust/src/backend
 
-# build dependencies
-RUN cargo new initdb && cargo new server
-
-COPY Cargo.lock Cargo.toml ./
-
-COPY server/Cargo.toml server/Cargo.toml
-COPY initdb/Cargo.toml initdb/Cargo.toml
-RUN cargo build -p backend --target x86_64-unknown-linux-musl --release --locked
-
 # build project
-COPY server ./server
-RUN cargo build -p backend --target x86_64-unknown-linux-musl --bin backend --release --frozen --offline
+COPY --chown=rust info ./info
+COPY --chown=rust log ./log
+COPY --chown=rust server ./server
+
+# without the `touch`, the compiler doesn't appear to realize the code has changed
+RUN touch info/src/lib.rs && touch log/src/lib.rs && cargo build --target x86_64-unknown-linux-musl --bin backend --release --frozen --offline
 
 FROM mwader/static-ffmpeg:4.3.1 AS ffmpeg
 

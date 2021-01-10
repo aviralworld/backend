@@ -1,3 +1,6 @@
-.git
+.git*
 target
 .env
+
+# this is redundant because we specify the Rust version ourselves
+rust-toolchain

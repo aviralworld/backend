@@ -2,17 +2,16 @@ use std::env;
 use std::error::Error;
 use std::sync::Arc;
 
-use slog::info;
 use warp::Filter;
 
 use backend::audio;
 use backend::config::{get_ffprobe, get_variable};
 use backend::db::PgDb;
 use backend::environment::{Config, Environment};
-use backend::log::initialize_logger;
 use backend::routes;
 use backend::store::S3Store;
 use backend::urls::Urls;
+use log::{info, initialize_logger};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -21,6 +20,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let store = Arc::new(S3Store::from_env().expect("initialize S3 store from environment"));
 
     let logger = initialize_logger();
+
+    #[cfg(feature = "enable_warp_logging")]
+    pretty_env_logger::init();
 
     let main_port: u16 = get_variable("BACKEND_PORT")
         .parse()

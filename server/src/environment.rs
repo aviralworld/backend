@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use slog::Logger;
+use log::Logger;
 
 use crate::errors::BackendError;
 use crate::store::Store;

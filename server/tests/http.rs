@@ -5,9 +5,9 @@ use std::sync::Arc;
 use std::sync::Once;
 
 use lazy_static::lazy_static;
+use log::{self, o, Logger};
 use once_cell::sync::OnceCell;
 use serde::Deserialize;
-use slog::{self, o, Logger};
 use url::Url;
 use warp::http::StatusCode;
 
