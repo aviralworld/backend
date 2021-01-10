@@ -31,8 +31,8 @@ mod inner {
     use std::sync::Arc;
 
     use lazy_static::lazy_static;
-    use serde::Deserialize;
     use log::Logger;
+    use serde::Deserialize;
 
     use crate::audio::format::AudioFormat;
     use crate::errors::BackendError;
