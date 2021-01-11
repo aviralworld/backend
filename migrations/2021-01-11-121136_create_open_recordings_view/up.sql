@@ -1,0 +1,1 @@
+CREATE OR REPLACE VIEW "open_recordings" AS SELECT "recording_tokens"."parent_id", "recording_tokens"."id" FROM "recording_tokens" INNER JOIN "recordings" ON "recording_tokens"."parent_id" = "recordings"."id" WHERE "recordings"."deleted_at" IS NULL LIMIT 1;
