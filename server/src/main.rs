@@ -1,5 +1,6 @@
 use std::env;
 use std::error::Error;
+use std::fs;
 use std::sync::Arc;
 
 use warp::Filter;
@@ -18,6 +19,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     dotenv::dotenv().ok();
 
     let store = Arc::new(S3Store::from_env().expect("initialize S3 store from environment"));
+
+    fs::create_dir_all(env::temp_dir()).expect("ensure temporary directory exists");
 
     let logger = initialize_logger();
 
