@@ -12,6 +12,7 @@ SELECT "recordings"."id",
        "recordings"."location",
        "recordings"."occupation",
        "categories"."label" AS "category",
+       "categories"."description" AS "category_description",
        "ages"."label" AS "age",
        "genders"."label" AS "gender",
        "mime_types"."essence" AS "mime_type"

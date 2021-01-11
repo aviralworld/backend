@@ -337,7 +337,13 @@ mod postgres {
         let query = sqlx::query(include_str!("queries/retrieve_ages.sql"));
 
         let ages: Vec<Label> = query
-            .try_map(|row: PgRow| Ok(Label::new(try_get(&row, "id")?, try_get(&row, "label")?)))
+            .try_map(|row: PgRow| {
+                Ok(Label::new(
+                    try_get(&row, "id")?,
+                    try_get(&row, "label")?,
+                    try_get_option(&row, "description")?,
+                ))
+            })
             .fetch_all(pool)
             .await
             .map_err(map_sqlx_error)?;
@@ -349,7 +355,13 @@ mod postgres {
         let query = sqlx::query(include_str!("queries/retrieve_categories.sql"));
 
         let categories: Vec<Label> = query
-            .try_map(|row: PgRow| Ok(Label::new(try_get(&row, "id")?, try_get(&row, "label")?)))
+            .try_map(|row: PgRow| {
+                Ok(Label::new(
+                    try_get(&row, "id")?,
+                    try_get(&row, "label")?,
+                    try_get_option(&row, "description")?,
+                ))
+            })
             .fetch_all(pool)
             .await
             .map_err(map_sqlx_error)?;
@@ -373,7 +385,13 @@ mod postgres {
         let query = sqlx::query(include_str!("queries/retrieve_genders.sql"));
 
         let genders: Vec<Label> = query
-            .try_map(|row: PgRow| Ok(Label::new(try_get(&row, "id")?, try_get(&row, "label")?)))
+            .try_map(|row: PgRow| {
+                Ok(Label::new(
+                    try_get(&row, "id")?,
+                    try_get(&row, "label")?,
+                    try_get_option(&row, "description")?,
+                ))
+            })
             .fetch_all(pool)
             .await
             .map_err(map_sqlx_error)?;
@@ -487,7 +505,7 @@ mod postgres {
 
                 // we use `match` here instead of `id.map` so that we can use `?`
                 match id {
-                    Some(id) => Ok(Some(Label::new(id, try_get(&row, label_column)?))),
+                    Some(id) => Ok(Some(Label::new(id, try_get(&row, label_column)?, None))),
                     None => Ok(None),
                 }
             };
@@ -500,8 +518,16 @@ mod postgres {
             sqlx::Error::Decode(Box::new(BackendError::UnableToParseUrl { url, source }))
         })?;
 
-        let mime_type = Label::new(try_get(&row, "mime_type_id")?, try_get(&row, "mime_type")?);
-        let category = Label::new(try_get(&row, "category_id")?, try_get(&row, "category")?);
+        let mime_type = Label::new(
+            try_get(&row, "mime_type_id")?,
+            try_get(&row, "mime_type")?,
+            None,
+        );
+        let category = Label::new(
+            try_get(&row, "category_id")?,
+            try_get(&row, "category")?,
+            try_get_option(&row, "category_description")?,
+        );
         let gender = make_optional_label("gender_id", "gender")?;
         let age = make_optional_label("age_id", "age")?;
 
@@ -533,6 +559,23 @@ mod postgres {
         use sqlx::prelude::*;
 
         row.try_get(column)
+    }
+
+    fn try_get_option<
+        'a,
+        T: sqlx::Type<sqlx::Postgres> + sqlx::decode::Decode<'a, sqlx::Postgres> + std::fmt::Debug,
+    >(
+        row: &'a PgRow,
+        column: &str,
+    ) -> Result<Option<T>, sqlx::Error> {
+        use sqlx::prelude::*;
+
+        let result: Result<Option<T>, sqlx::error::Error> = row.try_get(column);
+
+        match result {
+            Err(sqlx::Error::ColumnNotFound(_)) => Ok(None),
+            x => x,
+        }
     }
 
     fn map_sqlx_error(error: sqlx::Error) -> BackendError {

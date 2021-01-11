@@ -1,1 +1,1 @@
-SELECT "id", "label" FROM "categories" WHERE "enabled" IS TRUE;
+SELECT "id", "label", "description" FROM "categories" WHERE "enabled" IS TRUE;
