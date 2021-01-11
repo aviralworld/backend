@@ -30,7 +30,7 @@ INSERT INTO categories (id, label, enabled) VALUES (5, 'This one is disabled', F
 INSERT INTO categories (id, label, enabled) VALUES (7, 'This category has
   some newlines
 and spaces in it', TRUE);
-INSERT INTO categories (id, label, enabled) VALUES (3, 'यह हिन्दी है ।', TRUE);
+INSERT INTO categories (id, label, enabled, description) VALUES (3, 'यह हिन्दी है ।', TRUE, 'This is a description');
 INSERT INTO categories (id, label, enabled) VALUES (4, 'Ceci n’est pas une catégorie', TRUE);
 INSERT INTO categories (id, label, enabled) VALUES (1, 'یہ بھی ہے', TRUE);
 

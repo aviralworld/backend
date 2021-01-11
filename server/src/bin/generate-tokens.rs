@@ -1,7 +1,7 @@
 use std::error::Error;
 
 use dotenv::dotenv;
-use log::{debug, info};
+use log::{debug, info, initialize_logger};
 use structopt::StructOpt;
 use uuid::Uuid;
 
@@ -70,18 +70,4 @@ async fn main() -> Result<(), Box<dyn Error>> {
     );
 
     Ok(())
-}
-
-fn initialize_logger() -> log::Logger {
-    use log::Drain;
-    use log::{o, Fuse, Logger};
-    use slog_json::Json;
-    use std::sync::Mutex;
-
-    let drain = Mutex::new(Json::default(std::io::stderr())).map(Fuse);
-
-    Logger::root(
-        drain,
-        o!("version" => env!("CARGO_PKG_VERSION"), "revision" => option_env!("BACKEND_REVISION"), "build_timestamp" => option_env!("BUILD_TIMESTAMP").unwrap_or_else(|| "")),
-    )
 }

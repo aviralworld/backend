@@ -70,7 +70,7 @@ struct RandomRecording {
 
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
-struct RelatedLabel(i16, String);
+struct RelatedLabel(i16, String, Option<String>);
 
 static SLOG_SCOPE_GUARD: OnceCell<slog_scope::GlobalLoggerGuard> = OnceCell::new();
 
@@ -142,10 +142,10 @@ async fn test_ages() {
     lazy_static! {
         static ref AGES: Vec<RelatedLabel> = {
             vec![
-                RelatedLabel(1, String::from("Age 1")),
-                RelatedLabel(2, String::from("Age B")),
-                RelatedLabel(3, String::from("Age three")),
-                RelatedLabel(4, String::from("Fooled ya! This is Age 2")),
+                RelatedLabel(1, String::from("Age 1"), None),
+                RelatedLabel(2, String::from("Age B"), None),
+                RelatedLabel(3, String::from("Age three"), None),
+                RelatedLabel(4, String::from("Fooled ya! This is Age 2"), None),
             ]
         };
     }
@@ -170,18 +170,23 @@ async fn test_categories() {
     lazy_static! {
         static ref CATEGORIES: Vec<RelatedLabel> = {
             vec![
-                RelatedLabel(6, String::from("This is a category")),
-                RelatedLabel(2, String::from("Some other category")),
+                RelatedLabel(6, String::from("This is a category"), None),
+                RelatedLabel(2, String::from("Some other category"), None),
                 RelatedLabel(
                     7,
                     "This category has
   some newlines
 and spaces in it"
                         .to_owned(),
+                    None,
                 ),
-                RelatedLabel(3, String::from("यह हिन्दी है ।")),
-                RelatedLabel(4, String::from("Ceci n’est pas une catégorie")),
-                RelatedLabel(1, String::from("یہ بھی ہے")),
+                RelatedLabel(
+                    3,
+                    String::from("यह हिन्दी है ।"),
+                    Some(String::from("This is a description")),
+                ),
+                RelatedLabel(4, String::from("Ceci n’est pas une catégorie"), None),
+                RelatedLabel(1, String::from("یہ بھی ہے"), None),
             ]
         };
     }
@@ -206,10 +211,10 @@ async fn test_genders() {
     lazy_static! {
         static ref GENDERS: Vec<RelatedLabel> = {
             vec![
-                RelatedLabel(1, String::from("One of the genders")),
-                RelatedLabel(2, String::from("Some other genders")),
-                RelatedLabel(3, String::from("No gender specified")),
-                RelatedLabel(50, String::from("None of the above")),
+                RelatedLabel(1, String::from("One of the genders"), None),
+                RelatedLabel(2, String::from("Some other genders"), None),
+                RelatedLabel(3, String::from("No gender specified"), None),
+                RelatedLabel(50, String::from("None of the above"), None),
             ]
         };
     }
@@ -787,13 +792,16 @@ fn verify_recording_data(recording: &RetrievalResponse, id: &str, parent_id: &st
     assert_eq!(recording.mime_type.1, "audio/ogg; codec=opus");
 
     // serde has already verified that the times are i64s, i.e. valid as Unix timestamps
-    assert_eq!(recording.category, RelatedLabel(1, "یہ بھی ہے".to_owned()));
+    assert_eq!(
+        recording.category,
+        RelatedLabel(1, "یہ بھی ہے".to_owned(), None)
+    );
     assert_eq!(recording.parent, Some(parent_id.to_owned()));
     assert_eq!(recording.name, "Another \r\nname");
     assert_eq!(recording.age, None);
     assert_eq!(
         recording.gender,
-        Some(RelatedLabel(2, "Some other genders".to_owned()))
+        Some(RelatedLabel(2, "Some other genders".to_owned(), None))
     );
     assert_eq!(recording.location, None);
     assert_eq!(recording.occupation, Some("something".to_owned()));
