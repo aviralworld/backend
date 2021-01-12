@@ -29,8 +29,6 @@ COPY --from=ffmpeg /ffprobe /bin/ffprobe
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 ENV BACKEND_FFPROBE_PATH=/bin/ffprobe
 ENV SSL_CERT_DIR=/etc/ssl/certs/
-COPY dummy-etc-passwd /etc/passwd
-COPY --from=builder --chown=1000 /home/rust/src/backend/target/x86_64-unknown-linux-musl/release/backend /usr/app/backend
-USER 1000
+COPY --from=builder /home/rust/src/backend/target/x86_64-unknown-linux-musl/release/backend /usr/app/backend
 ENV TMPDIR /usr/app/tmp
 CMD ["/usr/app/backend"]
