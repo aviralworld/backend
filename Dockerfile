@@ -1,4 +1,5 @@
 ARG BASE_IMAGE
+ARG FFMPEG_VERSION
 
 FROM $BASE_IMAGE AS builder
 
@@ -17,7 +18,7 @@ COPY --chown=rust server ./server
 # without the `touch`, the compiler doesn't appear to realize the code has changed
 RUN touch info/src/lib.rs && touch log/src/lib.rs && cargo build --target x86_64-unknown-linux-musl --bin backend --release --frozen --offline
 
-FROM mwader/static-ffmpeg:4.3.1 AS ffmpeg
+FROM mwader/static-ffmpeg:$FFMPEG_VERSION AS ffmpeg
 
 FROM scratch
 
