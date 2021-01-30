@@ -56,7 +56,6 @@ pub fn make_formats_route<'a, O: Clone + Send + Sync + 'a>(
     environment: Environment<O>,
 ) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
     let recordings_path = environment.urls.recordings_path.clone();
-    let logger = environment.logger.clone();
 
     let handler =
         move || -> BoxFuture<Result<Json, reject::Rejection>> {
@@ -78,14 +77,12 @@ pub fn make_formats_route<'a, O: Clone + Send + Sync + 'a>(
         .and(warp::path::end())
         .and(warp::get())
         .and_then(handler)
-        .recover(move |r| format_rejection(logger.clone(), r))
 }
 
 pub fn make_ages_list_route<'a, O: Clone + Send + Sync + 'a>(
     environment: Environment<O>,
 ) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
     let recordings_path = environment.urls.recordings_path.clone();
-    let logger = environment.logger.clone();
 
     let handler = move || -> BoxFuture<Result<Json, reject::Rejection>> {
         let environment = environment.clone();
@@ -110,14 +107,12 @@ pub fn make_ages_list_route<'a, O: Clone + Send + Sync + 'a>(
         .and(warp::path::end())
         .and(warp::get())
         .and_then(handler)
-        .recover(move |r| format_rejection(logger.clone(), r))
 }
 
 pub fn make_categories_list_route<'a, O: Clone + Send + Sync + 'a>(
     environment: Environment<O>,
 ) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
     let recordings_path = environment.urls.recordings_path.clone();
-    let logger = environment.logger.clone();
 
     let handler = move || -> BoxFuture<Result<Json, reject::Rejection>> {
         let environment = environment.clone();
@@ -143,14 +138,12 @@ pub fn make_categories_list_route<'a, O: Clone + Send + Sync + 'a>(
         .and(warp::path::end())
         .and(warp::get())
         .and_then(handler)
-        .recover(move |r| format_rejection(logger.clone(), r))
 }
 
 pub fn make_genders_list_route<'a, O: Clone + Send + Sync + 'a>(
     environment: Environment<O>,
 ) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
     let recordings_path = environment.urls.recordings_path.clone();
-    let logger = environment.logger.clone();
 
     let handler = move || -> BoxFuture<Result<Json, reject::Rejection>> {
         let environment = environment.clone();
@@ -175,14 +168,12 @@ pub fn make_genders_list_route<'a, O: Clone + Send + Sync + 'a>(
         .and(warp::path::end())
         .and(warp::get())
         .and_then(handler)
-        .recover(move |r| format_rejection(logger.clone(), r))
 }
 
 pub fn make_count_route<'a, O: Clone + Send + Sync + 'a>(
     environment: Environment<O>,
 ) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
     let recordings_path = environment.urls.recordings_path.clone();
-    let logger = environment.logger.clone();
 
     let handler = move || -> BoxFuture<Result<Json, reject::Rejection>> {
         let environment = environment.clone();
@@ -206,13 +197,11 @@ pub fn make_count_route<'a, O: Clone + Send + Sync + 'a>(
         .and(warp::path::end())
         .and(warp::get())
         .and_then(handler)
-        .recover(move |r| format_rejection(logger.clone(), r))
 }
 
 pub fn make_upload_route<'a, O: Clone + Send + Sync + 'a>(
     environment: Environment<O>,
 ) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
-    let logger = environment.logger.clone();
     let urls = environment.urls.clone();
 
     // TODO this should stream the body from the request, but warp
@@ -314,14 +303,11 @@ pub fn make_upload_route<'a, O: Clone + Send + Sync + 'a>(
         .and(warp::post())
         .and(form().max_length(MAX_CONTENT_LENGTH))
         .and_then(handler)
-        .recover(move |r| format_rejection(logger.clone(), r))
 }
 
 pub fn make_children_route<'a, O: Clone + Send + Sync + 'a>(
     environment: Environment<O>,
 ) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
-    let logger = environment.logger.clone();
-
     let recordings_path = environment.urls.recordings_path.clone();
 
     let handler = move |parent: String| -> BoxFuture<Result<WithStatus<Json>, reject::Rejection>> {
@@ -349,14 +335,11 @@ pub fn make_children_route<'a, O: Clone + Send + Sync + 'a>(
         .and(warp::path::end())
         .and(warp::get())
         .and_then(handler)
-        .recover(move |r| format_rejection(logger.clone(), r))
 }
 
 pub fn make_delete_route<'a, O: Clone + Send + Sync + 'a>(
     environment: Environment<O>,
 ) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
-    let logger = environment.logger.clone();
-
     let recordings_path = environment.urls.recordings_path.clone();
 
     let handler = move |id: String| -> BoxFuture<Result<StatusCode, reject::Rejection>> {
@@ -386,14 +369,11 @@ pub fn make_delete_route<'a, O: Clone + Send + Sync + 'a>(
         .and(warp::path::end())
         .and(warp::delete())
         .and_then(handler)
-        .recover(move |r| format_rejection(logger.clone(), r))
 }
 
 pub fn make_retrieve_route<'a, O: Clone + Send + Sync + 'a>(
     environment: Environment<O>,
 ) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
-    let logger = environment.logger.clone();
-
     let recordings_path = environment.urls.recordings_path.clone();
 
     let handler = move |id: String| -> BoxFuture<Result<WithStatus<Json>, reject::Rejection>> {
@@ -434,14 +414,11 @@ pub fn make_retrieve_route<'a, O: Clone + Send + Sync + 'a>(
         .and(warp::path::end())
         .and(warp::get())
         .and_then(handler)
-        .recover(move |r| format_rejection(logger.clone(), r))
 }
 
 pub fn make_random_route<'a, O: Clone + Send + Sync + 'a>(
     environment: Environment<O>,
 ) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
-    let logger = environment.logger.clone();
-
     let recordings_path = environment.urls.recordings_path.clone();
 
     let handler = move |count: u8| -> BoxFuture<Result<Json, reject::Rejection>> {
@@ -469,14 +446,11 @@ pub fn make_random_route<'a, O: Clone + Send + Sync + 'a>(
         .and(warp::path::end())
         .and(warp::get())
         .and_then(handler)
-        .recover(move |r| format_rejection(logger.clone(), r))
 }
 
 pub fn make_token_route<'a, O: Clone + Send + Sync + 'a>(
     environment: Environment<O>,
 ) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
-    let logger = environment.logger.clone();
-
     let recordings_path = environment.urls.recordings_path.clone();
 
     let handler = move |id: Uuid| -> BoxFuture<Result<WithStatus<Json>, reject::Rejection>> {
@@ -513,24 +487,18 @@ pub fn make_token_route<'a, O: Clone + Send + Sync + 'a>(
         .and(warp::path::end())
         .and(warp::get())
         .and_then(handler)
-        .recover(move |r| format_rejection(logger.clone(), r))
 }
 
 pub fn make_healthz_route<'a, O: Clone + Send + Sync + 'a>(
-    environment: Environment<O>,
+    _environment: Environment<O>,
 ) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
-    let logger = environment.logger.clone();
-
-    warp::path("healthz")
-        .and(warp::get())
-        .map(move || {
-            Ok(json(&SuccessResponse::Healthz {
-                revision: info::REVISION,
-                timestamp: info::BUILD_TIMESTAMP,
-                version: info::VERSION,
-            }))
-        })
-        .recover(move |r| format_rejection(logger.clone(), r))
+    warp::path("healthz").and(warp::get()).map(move || {
+        Ok(json(&SuccessResponse::Healthz {
+            revision: info::REVISION,
+            timestamp: info::BUILD_TIMESTAMP,
+            version: info::VERSION,
+        }))
+    })
 }
 
 async fn parse_recording_metadata(
@@ -611,7 +579,10 @@ async fn complete_upload<'a, O: Clone + Send + Sync + 'a>(
     let db = environment.db.clone();
     let store = environment.store.clone();
 
-    store.save(&id, mime_type.essence.clone(), verified_audio).await.map_err(&error_handler)?;
+    store
+        .save(&id, mime_type.essence.clone(), verified_audio)
+        .await
+        .map_err(&error_handler)?;
 
     debug!(logger, "Updating recording URL...");
     update_recording_url(logger.clone(), db.clone(), store.clone(), &id, mime_type)
@@ -619,9 +590,7 @@ async fn complete_upload<'a, O: Clone + Send + Sync + 'a>(
         .map_err(&error_handler)?;
 
     debug!(logger, "Removing parent token...");
-    db.remove_token(&token)
-        .await
-        .map_err(&error_handler)?;
+    db.remove_token(&token).await.map_err(&error_handler)?;
 
     debug!(logger, "Creating child tokens...");
     let tokens = create_tokens(
@@ -681,7 +650,7 @@ async fn create_tokens(
     Ok(tokens)
 }
 
-async fn format_rejection(
+pub async fn format_rejection(
     logger: Arc<Logger>,
     rej: reject::Rejection,
 ) -> Result<WithStatus<Json>, reject::Rejection> {
