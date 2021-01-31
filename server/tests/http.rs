@@ -1,7 +1,7 @@
 use std::env;
 use std::fs;
 use std::path::Path;
-use std::process::Child;
+use tokio::process::Child;
 
 use lazy_static::lazy_static;
 use serde::Deserialize;
@@ -72,7 +72,8 @@ async fn api_works() {
         test_categories();
         test_genders();
 
-        test_non_existent_recording().await;
+        test_non_existent_recording();
+        test_bad_uploads();
 
         let content_type = multipart_content_type(&BOUNDARY);
 
@@ -128,7 +129,12 @@ async fn api_works() {
 }
 
 async fn run_server(show_output: bool) -> Child {
-    use std::process::{Command, Stdio};
+    use std::process::Stdio;
+    use std::time::Duration;
+
+    use futures::future::{select, Either};
+    use futures_timer::Delay;
+    use tokio::process::Command;
 
     let mut child = Command::new("cargo")
         .args(&["run", "-q", "--frozen", "--offline"])
@@ -139,37 +145,44 @@ async fn run_server(show_output: bool) -> Child {
         .env("BACKEND_RECORDINGS_PATH", RECORDINGS_PATH.to_string())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        .kill_on_drop(true)
         .spawn()
         .expect("run cargo run");
 
-    futures::future::poll_fn(|_cx| {
-        use futures::task::Poll;
+    let stderr = child.stderr.as_mut().expect("get child stderr handle");
 
-        let stdout = child.stderr.as_mut().expect("get child stdout handle");
+    use tokio::{
+        io::{AsyncBufReadExt, BufReader},
+        stream::StreamExt,
+    };
 
-        use std::io::{BufRead, BufReader};
+    let lines = BufReader::new(stderr).lines();
 
-        let mut reader = BufReader::new(stdout);
+    let initialization_future = lines
+        .take_while(|l| {
+            let line = l.as_ref().expect("get line from stream").to_string();
 
-        let mut line = String::new();
+            if show_output {
+                dbg!(&line);
+            }
 
-        reader
-            .read_line(&mut line)
-            .expect("read line from child stdout");
+            let result = serde_json::from_str::<serde_json::Value>(&line);
+            result.is_err()
+        })
+        .collect::<Vec<_>>();
 
-        if show_output {
-            dbg!(&line);
-        }
+    let timeout = Delay::new(Duration::from_secs(
+        get_variable("BACKEND_TESTING_INITIALIZATION_TIMEOUT_SECONDS")
+            .parse()
+            .expect("parse BACKEND_TESTING_INITIALIZATION_TIMEOUT_SECONDS"),
+    ));
 
-        let result: serde_json::Result<serde_json::Value> = serde_json::from_str(&line);
+    let result = select(initialization_future, timeout).await;
 
-        if result.is_ok() {
-            Poll::Ready(())
-        } else {
-            Poll::Pending
-        }
-    })
-    .await;
+    if let Either::Right(_) = result {
+        child.kill().expect("kill child process");
+        panic!("timed out while starting server");
+    }
 
     child
 }
@@ -572,8 +585,7 @@ fn test_token(token_id: String, parent_id: String) {
     }
 }
 
-#[tokio::test]
-async fn bad_uploads_fail() {
+fn test_bad_uploads() {
     {
         let response = reqwest::blocking::Client::new()
             .request(reqwest::Method::POST, url_to(None))
@@ -589,7 +601,7 @@ async fn bad_uploads_fail() {
     }
 }
 
-async fn test_non_existent_recording() {
+fn test_non_existent_recording() {
     use uuid::Uuid;
 
     let path = format!("id/{id}", id = Uuid::new_v4());
@@ -666,10 +678,11 @@ fn verify_recording_data(recording: &RetrievalResponse, id: &str, parent_id: &st
 
 fn url_to(path: Option<String>) -> Url {
     lazy_static! {
-        static ref BASE_URL: Url = {
-            let raw = get_variable("BACKEND_SERVER_URL");
-            Url::parse(&raw).expect("parse BACKEND_SERVER_URL as URL")
-        };
+        static ref BASE_URL: Url = Url::parse(&format!(
+            "http://127.0.0.1:{}",
+            get_variable("BACKEND_PORT")
+        ))
+        .expect("parse URL");
         static ref BASE_PATH: String = format!("{}/", RECORDINGS_PATH);
     }
 
