@@ -1,6 +1,7 @@
 use std::env;
 use std::fs;
 use std::path::Path;
+use std::process::Child;
 
 use lazy_static::lazy_static;
 use serde::Deserialize;
@@ -60,57 +61,117 @@ struct RandomRecording {
 struct RelatedLabel(i16, String, Option<String>);
 
 const BOUNDARY: &str = "thisisaboundary1234";
-
-lazy_static! {
-    static ref TOKENS_PER_RECORDING: u8 = get_variable("BACKEND_TOKENS_PER_RECORDING").parse().expect("parse BACKEND_TOKENS_PER_RECORDING");
-}
+const TOKENS_PER_RECORDING: u8 = 4;
+const RECORDINGS_PATH: &str = "recs";
 
 #[tokio::test]
 async fn api_works() {
+    async fn run() {
+        test_formats();
+        test_ages();
+        test_categories();
+        test_genders();
+
+        test_non_existent_recording().await;
+
+        let content_type = multipart_content_type(&BOUNDARY);
+
+        let cargo_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
+        let base_path = Path::new(&cargo_dir);
+        let file_path = base_path.join("tests").join("opus_file.ogg");
+
+        let (id, tokens) = test_upload(&file_path, &content_type);
+        test_duplicate_upload(&file_path, &content_type);
+
+        let children: serde_json::Value = serde_json::from_reader(
+            fs::File::open("tests/simple_metadata_children.json")
+                .expect("open simple_metadata_children.json"),
+        )
+        .expect("parse simple_metadata_children.json");
+
+        let results = test_uploading_children(&file_path, &content_type, &id, tokens, children);
+
+        let id_to_delete = results[2].0.to_owned();
+        test_deletion(
+            &id_to_delete,
+            &id,
+            &results
+                .iter()
+                .map(|(id, _)| id.to_owned())
+                .collect::<Vec<_>>(),
+        );
+
+        test_count();
+
+        test_random();
+
+        let (id, tokens) = results[0].to_owned();
+        test_token(tokens[0].to_owned(), id);
+    }
+
     dotenv::dotenv().ok();
 
     prepare_db().await;
 
-    test_formats();
-    test_ages();
-    test_categories();
-    test_genders();
+    let show_output = get_variable("BACKEND_TESTING_SHOW_SERVER_OUTPUT") == "1";
+    let mut child = run_server(show_output).await;
 
-    test_non_existent_recording().await;
+    let result = async move {
+        use futures::future::FutureExt;
 
-    let content_type = multipart_content_type(&BOUNDARY);
+        std::panic::AssertUnwindSafe(run()).catch_unwind().await
+    }
+    .await;
 
-    let cargo_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
-    let base_path = Path::new(&cargo_dir);
-    let file_path = base_path.join("tests").join("opus_file.ogg");
+    child.kill().expect("kill child process");
+    result.expect("run tests");
+}
 
-    let (id, tokens) = test_upload(&file_path, &content_type);
-    test_duplicate_upload(&file_path, &content_type);
+async fn run_server(show_output: bool) -> Child {
+    use std::process::{Command, Stdio};
 
-    let children: serde_json::Value = serde_json::from_reader(
-        fs::File::open("tests/simple_metadata_children.json")
-            .expect("open simple_metadata_children.json"),
-    )
-    .expect("parse simple_metadata_children.json");
+    let mut child = Command::new("cargo")
+        .args(&["run", "-q", "--frozen", "--offline"])
+        .env(
+            "BACKEND_TOKENS_PER_RECORDING",
+            TOKENS_PER_RECORDING.to_string(),
+        )
+        .env("BACKEND_RECORDINGS_PATH", RECORDINGS_PATH.to_string())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("run cargo run");
 
-    let results = test_uploading_children(&file_path, &content_type, &id, tokens, children);
+    futures::future::poll_fn(|_cx| {
+        use futures::task::Poll;
 
-    let id_to_delete = results[2].0.to_owned();
-    test_deletion(
-        &id_to_delete,
-        &id,
-        &results
-            .iter()
-            .map(|(id, _)| id.to_owned())
-            .collect::<Vec<_>>(),
-    );
+        let stdout = child.stderr.as_mut().expect("get child stdout handle");
 
-    test_count();
+        use std::io::{BufRead, BufReader};
 
-    test_random();
+        let mut reader = BufReader::new(stdout);
 
-    let (id, tokens) = results[0].to_owned();
-    test_token(tokens[0].to_owned(), id);
+        let mut line = String::new();
+
+        reader
+            .read_line(&mut line)
+            .expect("read line from child stdout");
+
+        if show_output {
+            dbg!(&line);
+        }
+
+        let result: serde_json::Result<serde_json::Value> = serde_json::from_str(&line);
+
+        if result.is_ok() {
+            Poll::Ready(())
+        } else {
+            Poll::Pending
+        }
+    })
+    .await;
+
+    child
 }
 
 fn test_formats() {
@@ -239,7 +300,7 @@ fn test_upload(
         .path_segments()
         .expect("get location path segments")
         .collect::<Vec<_>>();
-    assert_eq!(segments[0], get_variable("BACKEND_RECORDINGS_PATH"));
+    assert_eq!(segments[0], RECORDINGS_PATH);
     assert_eq!(segments.len(), 2);
 
     let response = serde_json::from_str::<CreationResponse>(
@@ -255,7 +316,7 @@ fn test_upload(
 
     assert_eq!(
         tokens.len(),
-        *TOKENS_PER_RECORDING as usize,
+        TOKENS_PER_RECORDING as usize,
         "response must provide the correct number of tokens"
     );
 
@@ -394,7 +455,8 @@ fn test_uploading_child(
 
 fn test_deletion(id_to_delete: &str, parent: &str, ids: &[String]) {
     let path = format!("id/{id}/", id = id_to_delete);
-    let response = reqwest::blocking::get(url_to(Some(path.clone()))).expect(&format!("get /{}", path));
+    let response =
+        reqwest::blocking::get(url_to(Some(path.clone()))).expect(&format!("get /{}", path));
 
     assert_eq!(response.status(), StatusCode::OK);
 
@@ -608,8 +670,7 @@ fn url_to(path: Option<String>) -> Url {
             let raw = get_variable("BACKEND_SERVER_URL");
             Url::parse(&raw).expect("parse BACKEND_SERVER_URL as URL")
         };
-
-        static ref BASE_PATH: String = format!("{}/", get_variable("BACKEND_RECORDINGS_PATH"));
+        static ref BASE_PATH: String = format!("{}/", RECORDINGS_PATH);
     }
 
     let base = BASE_URL
@@ -628,7 +689,9 @@ async fn prepare_db() {
     let connection_string = get_variable("BACKEND_DB_CONNECTION_STRING");
 
     if env::var("BACKEND_TEST_INITIALIZE_DB").unwrap_or_else(|_| "0".to_owned()) == "1" {
-        tokio::task::spawn_blocking(move || initialize_db_for_test(&connection_string)).await.expect("initialize DB");
+        tokio::task::spawn_blocking(move || initialize_db_for_test(&connection_string))
+            .await
+            .expect("initialize DB");
     }
 }
 
