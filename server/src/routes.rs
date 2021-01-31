@@ -286,7 +286,7 @@ pub fn make_upload_route<'a, O: Clone + Send + Sync + 'a>(
                     .map_err(&error_handler)?;
 
                 match mime_type {
-                    Some(mime_type) => complete_upload(environment.clone(), id.clone(), token.clone(), mime_type, verified_audio, error_handler).await,
+                    Some(mime_type) => complete_upload(environment.clone(), id, token, mime_type, verified_audio, error_handler).await,
                     // why does this work but not directly returning `Err(error_handler(BackendError::...))`?
                     None => Err(BackendError::InvalidAudioFormat {
                         format: audio_format,
