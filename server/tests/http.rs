@@ -1,10 +1,11 @@
 use std::env;
 use std::fs;
 use std::path::Path;
-use tokio::process::Child;
+use std::sync::{Arc, RwLock};
 
 use lazy_static::lazy_static;
 use serde::Deserialize;
+use tokio::process::Child;
 use url::Url;
 use warp::http::StatusCode;
 
@@ -60,84 +61,90 @@ struct RandomRecording {
 #[serde(deny_unknown_fields)]
 struct RelatedLabel(i16, String, Option<String>);
 
+type ChildOutput = Arc<RwLock<Vec<String>>>;
+
 const BOUNDARY: &str = "thisisaboundary1234";
 const TOKENS_PER_RECORDING: u8 = 4;
 const RECORDINGS_PATH: &str = "recs";
 
 #[tokio::test]
 async fn api_works() {
-    async fn run() {
-        test_formats();
-        test_ages();
-        test_categories();
-        test_genders();
-
-        test_non_existent_recording();
-        test_bad_uploads();
-
-        let content_type = multipart_content_type(&BOUNDARY);
-
-        let cargo_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
-        let base_path = Path::new(&cargo_dir);
-        let file_path = base_path.join("tests").join("opus_file.ogg");
-
-        let (id, tokens) = test_upload(&file_path, &content_type);
-        test_duplicate_upload(&file_path, &content_type);
-
-        let children: serde_json::Value = serde_json::from_reader(
-            fs::File::open("tests/simple_metadata_children.json")
-                .expect("open simple_metadata_children.json"),
-        )
-        .expect("parse simple_metadata_children.json");
-
-        let results = test_uploading_children(&file_path, &content_type, &id, tokens, children);
-
-        let id_to_delete = results[2].0.to_owned();
-        test_deletion(
-            &id_to_delete,
-            &id,
-            &results
-                .iter()
-                .map(|(id, _)| id.to_owned())
-                .collect::<Vec<_>>(),
-        );
-
-        test_count();
-
-        test_random();
-
-        let (id, tokens) = results[0].to_owned();
-        test_token(tokens[0].to_owned(), id);
-    }
-
     dotenv::dotenv().ok();
 
     prepare_db().await;
 
     let show_output = get_variable("BACKEND_TESTING_SHOW_SERVER_OUTPUT") == "1";
-    let mut child = run_server(show_output).await;
+    let (mut child, initial_output) = start_server().await;
 
     let result = async move {
         use futures::future::FutureExt;
 
-        std::panic::AssertUnwindSafe(run()).catch_unwind().await
+        std::panic::AssertUnwindSafe(test_api())
+            .catch_unwind()
+            .await
     }
     .await;
 
     child.kill().expect("kill child process");
+
+    if show_output {
+        print_child_output(initial_output, child).await;
+    };
+
     result.expect("run tests");
 }
 
-async fn run_server(show_output: bool) -> Child {
-    use std::process::Stdio;
-    use std::time::Duration;
+async fn test_api() {
+    test_formats();
+    test_ages();
+    test_categories();
+    test_genders();
 
-    use futures::future::{select, Either};
-    use futures_timer::Delay;
+    test_non_existent_recording();
+    test_bad_uploads();
+
+    let content_type = multipart_content_type(&BOUNDARY);
+
+    let cargo_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
+    let base_path = Path::new(&cargo_dir);
+    let file_path = base_path.join("tests").join("opus_file.ogg");
+
+    let (id, tokens) = test_upload(&file_path, &content_type);
+    test_duplicate_upload(&file_path, &content_type);
+
+    let children: serde_json::Value = serde_json::from_reader(
+        fs::File::open("tests/simple_metadata_children.json")
+            .expect("open simple_metadata_children.json"),
+    )
+    .expect("parse simple_metadata_children.json");
+
+    let results = test_uploading_children(&file_path, &content_type, &id, tokens, children);
+
+    let id_to_delete = results[2].0.to_owned();
+    test_deletion(
+        &id_to_delete,
+        &id,
+        &results
+            .iter()
+            .map(|(id, _)| id.to_owned())
+            .collect::<Vec<_>>(),
+    );
+
+    test_count();
+
+    test_random();
+
+    let (id, tokens) = results[0].to_owned();
+    test_token(tokens[0].to_owned(), id);
+}
+
+async fn start_server() -> (Child, Vec<String>) {
+    use std::process::Stdio;
+
     use tokio::process::Command;
 
     let mut child = Command::new("cargo")
-        .args(&["run", "-q", "--frozen", "--offline"])
+        .args(&["run", "--frozen", "--offline"])
         .env(
             "BACKEND_TOKENS_PER_RECORDING",
             TOKENS_PER_RECORDING.to_string(),
@@ -149,27 +156,43 @@ async fn run_server(show_output: bool) -> Child {
         .spawn()
         .expect("run cargo run");
 
-    let stderr = child.stderr.as_mut().expect("get child stderr handle");
+    let (started, output_lock) = wait_for_server(&mut child).await;
 
-    use tokio::{
-        io::{AsyncBufReadExt, BufReader},
-        stream::StreamExt,
-    };
+    let output = output_lock.read().unwrap().to_vec();
 
-    let lines = BufReader::new(stderr).lines();
+    if started {
+        (child, output)
+    } else {
+        child.kill().expect("kill child");
+        print_child_output(output, child).await;
+        panic!("could not run child");
+    }
+}
+
+async fn wait_for_server(child: &mut Child) -> (bool, ChildOutput) {
+    use std::time::Duration;
+
+    use futures::future::{select, Either};
+    use futures_timer::Delay;
+    use tokio::stream::StreamExt;
+
+    let lines = get_child_stderr(child);
+
+    let output = Arc::new(RwLock::new(vec![]));
+
+    let output_clone = output.clone();
 
     let initialization_future = lines
-        .take_while(|l| {
+        .take_while(move |l| {
             let line = l.as_ref().expect("get line from stream").to_string();
 
-            if show_output {
-                dbg!(&line);
-            }
+            output_clone.write().unwrap().push(line.to_string());
 
             let result = serde_json::from_str::<serde_json::Value>(&line);
+
             result.is_err()
         })
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>, _>>();
 
     let timeout = Delay::new(Duration::from_secs(
         get_variable("BACKEND_TESTING_INITIALIZATION_TIMEOUT_SECONDS")
@@ -177,14 +200,47 @@ async fn run_server(show_output: bool) -> Child {
             .expect("parse BACKEND_TESTING_INITIALIZATION_TIMEOUT_SECONDS"),
     ));
 
-    let result = select(initialization_future, timeout).await;
-
-    if let Either::Right(_) = result {
-        child.kill().expect("kill child process");
-        panic!("timed out while starting server");
+    match select(initialization_future, timeout).await {
+        Either::Left((_, _)) => (true, output),
+        Either::Right((_, _)) => (false, output),
     }
+}
 
-    child
+fn get_child_stderr(
+    child: &mut Child,
+) -> impl tokio::stream::Stream<Item = Result<String, std::io::Error>> + '_ {
+    let stderr = child.stderr.as_mut().expect("get child stderr handle");
+
+    use tokio::io::{AsyncBufReadExt, BufReader};
+
+    BufReader::new(stderr).lines()
+}
+
+async fn print_child_output(initial_output: Vec<String>, child: Child) {
+    use std::io::{stderr, stdout, Write};
+
+    let output = child.wait_with_output().await.expect("get child output");
+
+    let stdout = stdout();
+    let mut stdout = stdout.lock();
+    write!(stdout, "Exit status: {:?}\n", output.status.code()).expect("write exit status");
+
+    write!(
+        stdout,
+        "\nSTDOUT:\n{}",
+        String::from_utf8(output.stdout).expect("decode stdout as UTF-8")
+    )
+    .expect("write stdout");
+
+    let stderr = stderr();
+    let mut stderr = stderr.lock();
+    write!(
+        stderr,
+        "\nSTDERR:\n{}\n{}\n",
+        initial_output.join("\n"),
+        String::from_utf8(output.stderr).expect("decode stderr as UTF-8")
+    )
+    .expect("write stderr");
 }
 
 fn test_formats() {

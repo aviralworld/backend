@@ -76,6 +76,8 @@ test:
     BACKEND_TESTING_INITIALIZATION_TIMEOUT_SECONDS: 10
     BACKEND_BASE_URL: https://www.example.com/
     BACKEND_RECORDINGS_PATH: recordings
+    BACKEND_PORT: 50001
+    BACKEND_ADMIN_PORT: 50002
 
     POSTGRES_USER: postgres
     POSTGRES_PASSWORD: 1234     # used by postgres container
@@ -95,8 +97,8 @@ test:
     - rustup component add clippy
   script:
     - cargo fetch
-    - cargo clippy --release --frozen
-    - cargo test --release --frozen --no-fail-fast
+    - cargo clippy --frozen
+    - cargo test --frozen --no-fail-fast
   only:
     - merge_requests
   interruptible: yes
