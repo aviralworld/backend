@@ -34,8 +34,7 @@ test:
   services:
     - postgres:12.3-alpine@sha256:4c5db602c06b811737746e4564040e554ba68cd2ded46a736cbe1af3a638ed0a
     - adobe/s3mock:2.1.24@sha256:f444c12e38050dcf339e8784cacfa40d14a4876503d2818982acb7f117ef03df
-  # trying to run this with Alpine Linux results in a build error later
-  image: rust:${RUST_VERSION}-slim
+  image: rust:${RUST_VERSION}-alpine
   cache:
     paths:
       - .cargo
@@ -87,13 +86,13 @@ test:
 
     BACKEND_DB_CONNECTION_STRING: "postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB_NAME"
 
-    # equivalent to #![deny(warnings)]
-    RUSTFLAGS: "-D warnings"
+    # -D warnings = #![deny(warnings)]
+    RUSTFLAGS: "-D warnings -C target-feature=-crt-static"
   before_script:
     # TODO also test with `ffmpeg-next`
-    - apt-get -o=Dpkg::Use-Pty=0 -qqy update && apt-get -o=Dpkg::Use-Pty=0 -qqy install libssl-dev pkg-config ffmpeg libsqlite3-dev postgresql-client
+    - apk add -q openssl-dev ffmpeg sqlite-dev postgresql-client musl-dev
     - PGPASSWORD=$POSTGRES_PASSWORD createdb -h $POSTGRES_HOST -p $POSTGRES_PORT -U $POSTGRES_USER $POSTGRES_DB_NAME
-    - rustup default stable
+    - rustup default $RUST_VERSION
     - rustup component add clippy
   script:
     - cargo fetch
