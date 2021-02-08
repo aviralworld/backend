@@ -1,26 +1,15 @@
 use std::env;
 use std::fs;
 use std::path::Path;
-use std::sync::Arc;
-use std::sync::Once;
+use std::sync::{Arc, RwLock};
 
 use lazy_static::lazy_static;
-use log::{self, o, Logger};
-use once_cell::sync::OnceCell;
 use serde::Deserialize;
+use tokio::process::Child;
 use url::Url;
 use warp::http::StatusCode;
 
-use backend::db::Db;
-use backend::environment::{Config, Environment};
-use backend::errors;
-use backend::routes;
-use backend::store::S3Store;
-use backend::urls::Urls;
-use backend::{
-    audio::format::AudioFormat,
-    config::{get_ffprobe, get_variable},
-};
+use backend::config::get_variable;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -72,20 +61,47 @@ struct RandomRecording {
 #[serde(deny_unknown_fields)]
 struct RelatedLabel(i16, String, Option<String>);
 
-static SLOG_SCOPE_GUARD: OnceCell<slog_scope::GlobalLoggerGuard> = OnceCell::new();
+type ChildOutput = Arc<RwLock<Vec<String>>>;
 
 const BOUNDARY: &str = "thisisaboundary1234";
-
 const TOKENS_PER_RECORDING: u8 = 4;
+const RECORDINGS_PATH: &str = "recs";
 
 #[tokio::test]
 async fn api_works() {
-    test_formats().await;
-    test_ages().await;
-    test_categories().await;
-    test_genders().await;
+    dotenv::dotenv().ok();
 
-    test_non_existent_recording().await;
+    prepare_db().await;
+
+    let show_output = get_variable("BACKEND_TESTING_SHOW_SERVER_OUTPUT") == "1";
+    let (mut child, initial_output) = start_server().await;
+
+    let result = async move {
+        use futures::future::FutureExt;
+
+        std::panic::AssertUnwindSafe(test_api())
+            .catch_unwind()
+            .await
+    }
+    .await;
+
+    child.kill().expect("kill child process");
+
+    if show_output {
+        print_child_output(initial_output, child).await;
+    };
+
+    result.expect("run tests");
+}
+
+async fn test_api() {
+    test_formats();
+    test_ages();
+    test_categories();
+    test_genders();
+
+    test_non_existent_recording();
+    test_bad_uploads();
 
     let content_type = multipart_content_type(&BOUNDARY);
 
@@ -93,8 +109,8 @@ async fn api_works() {
     let base_path = Path::new(&cargo_dir);
     let file_path = base_path.join("tests").join("opus_file.ogg");
 
-    let (id, tokens) = test_upload(&file_path, &content_type).await;
-    test_duplicate_upload(&file_path, &content_type).await;
+    let (id, tokens) = test_upload(&file_path, &content_type);
+    test_duplicate_upload(&file_path, &content_type);
 
     let children: serde_json::Value = serde_json::from_reader(
         fs::File::open("tests/simple_metadata_children.json")
@@ -102,7 +118,7 @@ async fn api_works() {
     )
     .expect("parse simple_metadata_children.json");
 
-    let results = test_uploading_children(&file_path, &content_type, &id, tokens, children).await;
+    let results = test_uploading_children(&file_path, &content_type, &id, tokens, children);
 
     let id_to_delete = results[2].0.to_owned();
     test_deletion(
@@ -112,33 +128,133 @@ async fn api_works() {
             .iter()
             .map(|(id, _)| id.to_owned())
             .collect::<Vec<_>>(),
-    )
-    .await;
+    );
 
-    test_count().await;
+    test_count();
 
-    test_random().await;
+    test_random();
 
     let (id, tokens) = results[0].to_owned();
-    test_token(tokens[0].to_owned(), id).await;
+    test_token(tokens[0].to_owned(), id);
 }
 
-async fn test_formats() {
-    let response = warp::test::request()
-        .path("/recs/formats")
-        .method("GET")
-        .reply(&make_formats_filter("test_formats").await)
-        .await;
+async fn start_server() -> (Child, Vec<String>) {
+    use std::process::Stdio;
 
-    let body = String::from_utf8_lossy(response.body()).into_owned();
+    use tokio::process::Command;
+
+    let mut child = Command::new("cargo")
+        .args(&["run", "--frozen", "--offline"])
+        .env(
+            "BACKEND_TOKENS_PER_RECORDING",
+            TOKENS_PER_RECORDING.to_string(),
+        )
+        .env("BACKEND_RECORDINGS_PATH", RECORDINGS_PATH.to_string())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .expect("run cargo run");
+
+    let (started, output_lock) = wait_for_server(&mut child).await;
+
+    let output = output_lock.read().unwrap().to_vec();
+
+    if started {
+        (child, output)
+    } else {
+        child.kill().expect("kill child");
+        print_child_output(output, child).await;
+        panic!("could not run child");
+    }
+}
+
+async fn wait_for_server(child: &mut Child) -> (bool, ChildOutput) {
+    use std::time::Duration;
+
+    use futures::future::{select, Either};
+    use futures_timer::Delay;
+    use tokio::stream::StreamExt;
+
+    let lines = get_child_stderr(child);
+
+    let output = Arc::new(RwLock::new(vec![]));
+
+    let output_clone = output.clone();
+
+    let initialization_future = lines
+        .take_while(move |l| {
+            let line = l.as_ref().expect("get line from stream").to_string();
+
+            output_clone.write().unwrap().push(line.to_string());
+
+            let result = serde_json::from_str::<serde_json::Value>(&line);
+
+            result.is_err()
+        })
+        .collect::<Result<Vec<_>, _>>();
+
+    let timeout = Delay::new(Duration::from_secs(
+        get_variable("BACKEND_TESTING_INITIALIZATION_TIMEOUT_SECONDS")
+            .parse()
+            .expect("parse BACKEND_TESTING_INITIALIZATION_TIMEOUT_SECONDS"),
+    ));
+
+    match select(initialization_future, timeout).await {
+        Either::Left((_, _)) => (true, output),
+        Either::Right((_, _)) => (false, output),
+    }
+}
+
+fn get_child_stderr(
+    child: &mut Child,
+) -> impl tokio::stream::Stream<Item = Result<String, std::io::Error>> + '_ {
+    let stderr = child.stderr.as_mut().expect("get child stderr handle");
+
+    use tokio::io::{AsyncBufReadExt, BufReader};
+
+    BufReader::new(stderr).lines()
+}
+
+async fn print_child_output(initial_output: Vec<String>, child: Child) {
+    use std::io::{stderr, stdout, Write};
+
+    let output = child.wait_with_output().await.expect("get child output");
+
+    let stdout = stdout();
+    let mut stdout = stdout.lock();
+    write!(stdout, "Exit status: {:?}\n", output.status.code()).expect("write exit status");
+
+    write!(
+        stdout,
+        "\nSTDOUT:\n{}",
+        String::from_utf8(output.stdout).expect("decode stdout as UTF-8")
+    )
+    .expect("write stdout");
+
+    let stderr = stderr();
+    let mut stderr = stderr.lock();
+    write!(
+        stderr,
+        "\nSTDERR:\n{}\n{}\n",
+        initial_output.join("\n"),
+        String::from_utf8(output.stderr).expect("decode stderr as UTF-8")
+    )
+    .expect("write stderr");
+}
+
+fn test_formats() {
+    let response =
+        reqwest::blocking::get(url_to(Some("formats".to_string()))).expect("get /formats");
 
     let formats =
-        serde_json::from_str::<Vec<String>>(&body).expect("parse response as Vec<String>");
+        serde_json::from_str::<Vec<String>>(&response.text().expect("get response body as string"))
+            .expect("parse response as Vec<String>");
 
     assert_eq!(formats, vec!["audio/ogg; codec=opus", "audio/ogg"]);
 }
 
-async fn test_ages() {
+fn test_ages() {
     lazy_static! {
         static ref AGES: Vec<RelatedLabel> = {
             vec![
@@ -150,23 +266,19 @@ async fn test_ages() {
         };
     }
 
-    let response = warp::test::request()
-        .path("/recs/ages")
-        .method("GET")
-        .reply(&make_ages_list_filter("test_ages").await)
-        .await;
+    let response = reqwest::blocking::get(url_to(Some("ages".to_string()))).expect("get /ages");
 
     assert_eq!(response.status(), 200);
 
-    let body = String::from_utf8_lossy(response.body()).into_owned();
-
-    let ages = serde_json::from_str::<Vec<RelatedLabel>>(&body)
-        .expect("parse response as Vec<RelatedLabel>");
+    let ages = serde_json::from_str::<Vec<RelatedLabel>>(
+        &response.text().expect("get response body as string"),
+    )
+    .expect("parse response as Vec<RelatedLabel>");
 
     assert_eq!(ages, *AGES);
 }
 
-async fn test_categories() {
+fn test_categories() {
     lazy_static! {
         static ref CATEGORIES: Vec<RelatedLabel> = {
             vec![
@@ -191,23 +303,19 @@ and spaces in it"
         };
     }
 
-    let response = warp::test::request()
-        .path("/recs/categories")
-        .method("GET")
-        .reply(&make_categories_list_filter("test_categories").await)
-        .await;
+    let response =
+        reqwest::blocking::get(url_to(Some("categories".to_string()))).expect("get /categories");
 
     assert_eq!(response.status(), 200);
 
-    let body = String::from_utf8_lossy(response.body()).into_owned();
-
-    let categories = serde_json::from_str::<Vec<RelatedLabel>>(&body)
-        .expect("parse response as Vec<RelatedLabel>");
+    let categories =
+        serde_json::from_str::<Vec<RelatedLabel>>(&response.text().expect("get response body"))
+            .expect("parse response as Vec<RelatedLabel>");
 
     assert_eq!(categories, *CATEGORIES);
 }
 
-async fn test_genders() {
+fn test_genders() {
     lazy_static! {
         static ref GENDERS: Vec<RelatedLabel> = {
             vec![
@@ -219,23 +327,19 @@ async fn test_genders() {
         };
     }
 
-    let response = warp::test::request()
-        .path("/recs/genders")
-        .method("GET")
-        .reply(&make_genders_list_filter("test_genders").await)
-        .await;
+    let response =
+        reqwest::blocking::get(url_to(Some("genders".to_string()))).expect("get /genders");
 
     assert_eq!(response.status(), 200);
 
-    let body = String::from_utf8_lossy(response.body()).into_owned();
-
-    let genders = serde_json::from_str::<Vec<RelatedLabel>>(&body)
-        .expect("parse response as Vec<RelatedLabel>");
+    let genders =
+        serde_json::from_str::<Vec<RelatedLabel>>(&response.text().expect("get response body"))
+            .expect("parse response as Vec<RelatedLabel>");
 
     assert_eq!(genders, *GENDERS);
 }
 
-async fn test_upload(
+fn test_upload(
     file_path: impl AsRef<Path>,
     content_type: impl AsRef<str>,
 ) -> (String, Vec<String>) {
@@ -246,13 +350,9 @@ async fn test_upload(
         content_type.as_ref(),
         BOUNDARY.as_bytes(),
         &bytes,
-    )
-    .reply(&make_upload_filter("test_upload").await)
-    .await;
+    );
 
     assert_eq!(response.status(), StatusCode::CREATED);
-
-    let body = String::from_utf8_lossy(response.body()).into_owned();
 
     let headers = response.headers();
 
@@ -269,10 +369,13 @@ async fn test_upload(
         .path_segments()
         .expect("get location path segments")
         .collect::<Vec<_>>();
-    assert_eq!(segments[0], "recs");
+    assert_eq!(segments[0], RECORDINGS_PATH);
     assert_eq!(segments.len(), 2);
 
-    let response = serde_json::from_str::<CreationResponse>(&body).expect("parse response as JSON");
+    let response = serde_json::from_str::<CreationResponse>(
+        &response.text().expect("get response body as string"),
+    )
+    .expect("parse response as JSON");
 
     let id = response.id.expect("get ID from response");
 
@@ -289,9 +392,7 @@ async fn test_upload(
     (id, tokens)
 }
 
-async fn test_duplicate_upload(file_path: impl AsRef<Path>, content_type: impl AsRef<str>) {
-    let filter = make_upload_filter("check_duplicate_upload").await;
-
+fn test_duplicate_upload(file_path: impl AsRef<Path>, content_type: impl AsRef<str>) {
     // ensure the token cannot be reused
     {
         let bytes = fs::read("tests/simple_metadata_with_same_token.json")
@@ -302,16 +403,13 @@ async fn test_duplicate_upload(file_path: impl AsRef<Path>, content_type: impl A
             content_type.as_ref(),
             BOUNDARY.as_bytes(),
             &bytes,
-        )
-        .reply(&filter)
-        .await;
+        );
 
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 
-        let body = String::from_utf8_lossy(response.body()).into_owned();
-
         let deserialized: CreationResponse =
-            serde_json::from_str(&body).expect("parse response as JSON");
+            serde_json::from_str(&response.text().expect("get response body as string"))
+                .expect("parse response as JSON");
         assert!(
             deserialized.id.is_none(),
             "error response must not include key"
@@ -332,16 +430,13 @@ async fn test_duplicate_upload(file_path: impl AsRef<Path>, content_type: impl A
             content_type.as_ref(),
             BOUNDARY.as_bytes(),
             &bytes,
-        )
-        .reply(&filter)
-        .await;
+        );
 
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
 
-        let body = String::from_utf8_lossy(response.body()).into_owned();
-
         let deserialized: CreationResponse =
-            serde_json::from_str(&body).expect("parse response as JSON");
+            serde_json::from_str(&response.text().expect("get response body as string"))
+                .expect("parse response as JSON");
         assert!(
             deserialized.id.is_none(),
             "error response must not include key"
@@ -354,7 +449,7 @@ async fn test_duplicate_upload(file_path: impl AsRef<Path>, content_type: impl A
     }
 }
 
-async fn test_uploading_children(
+fn test_uploading_children(
     file_path: impl AsRef<Path>,
     content_type: impl AsRef<str>,
     parent: &str,
@@ -372,25 +467,22 @@ async fn test_uploading_children(
             content_type.as_ref(),
             tokens.pop().unwrap(),
             &mut child,
-        )
-        .await;
+        );
 
         if let Some((id, tokens)) = result {
             results.push((id, tokens));
         }
     }
 
-    let children_filter = make_children_filter("api_works").await;
-
     {
-        let request = warp::test::request()
-            .path(&format!("/recs/id/{id}/children/", id = parent))
-            .method("GET")
-            .reply(&children_filter)
-            .await;
-        assert_eq!(request.status(), StatusCode::OK);
+        let path = format!("id/{id}/children/", id = parent);
+        let response = reqwest::blocking::get(url_to(Some(path.to_string())))
+            .expect(&format!("get {path}", path = path));
 
-        let returned_ids = parse_children_ids(request.body());
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let returned_ids =
+            parse_children_ids(&response.bytes().expect("get response body as bytes"));
         assert_eq!(
             results.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>(),
             returned_ids
@@ -400,13 +492,12 @@ async fn test_uploading_children(
     results
 }
 
-async fn test_uploading_child(
+fn test_uploading_child(
     file_path: impl AsRef<Path>,
     content_type: impl AsRef<str>,
     token: String,
     child: &mut serde_json::Value,
 ) -> Option<(String, Vec<String>)> {
-    let filter = make_upload_filter("test_uploading_child").await;
     let object = child.as_object_mut().expect("get child as object");
     object.insert("token".to_owned(), serde_json::json!(token));
     let bytes = serde_json::to_vec(&object).expect("serialize edited child as JSON");
@@ -416,14 +507,14 @@ async fn test_uploading_child(
         content_type.as_ref(),
         BOUNDARY.as_bytes(),
         &bytes,
-    )
-    .reply(&filter)
-    .await;
+    );
 
     assert_eq!(response.status(), StatusCode::CREATED);
-    let body = String::from_utf8_lossy(response.body()).into_owned();
 
-    let response = serde_json::from_str::<CreationResponse>(&body).expect("parse response as JSON");
+    let response = serde_json::from_str::<CreationResponse>(
+        &response.text().expect("get response body as string"),
+    )
+    .expect("parse response as JSON");
 
     let id = response.id.unwrap();
     let tokens = response.tokens.unwrap();
@@ -431,24 +522,23 @@ async fn test_uploading_child(
     Some((id, tokens))
 }
 
-async fn test_deletion(id_to_delete: &str, parent: &str, ids: &[String]) {
-    let retrieve_filter = make_retrieve_filter("api_works").await;
-    let request = warp::test::request()
-        .path(&format!("/recs/id/{id}/", id = id_to_delete))
-        .method("GET")
-        .reply(&retrieve_filter)
-        .await;
-    assert_eq!(request.status(), StatusCode::OK);
+fn test_deletion(id_to_delete: &str, parent: &str, ids: &[String]) {
+    let path = format!("id/{id}/", id = id_to_delete);
+    let response =
+        reqwest::blocking::get(url_to(Some(path.clone()))).expect(&format!("get /{}", path));
+
+    assert_eq!(response.status(), StatusCode::OK);
+
     let recording: RetrievalResponse =
-        serde_json::from_slice(request.body()).expect("deserialize retrieved recording");
+        serde_json::from_slice(&response.bytes().expect("get response body as string"))
+            .expect("deserialize retrieved recording");
     verify_recording_data(&recording, id_to_delete, parent);
 
     // can't hard-code a test for the URL since it can vary based on the environment
     let recording_url = &recording.url;
 
     {
-        let response = reqwest::get(recording_url)
-            .await
+        let response = reqwest::blocking::get(recording_url)
             .expect("verify recording exists in store before deleting");
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(
@@ -462,33 +552,30 @@ async fn test_deletion(id_to_delete: &str, parent: &str, ids: &[String]) {
         );
     }
 
-    let delete_filter = make_delete_filter("api_works").await;
-    let request = warp::test::request()
-        .path(&format!("/recs/id/{id}/", id = id_to_delete))
-        .method("DELETE")
-        .reply(&delete_filter)
-        .await;
-    assert_eq!(request.status(), StatusCode::NO_CONTENT);
+    let client = reqwest::blocking::Client::new();
+    let path = format!("id/{id}/", id = id_to_delete);
+    let response = client
+        .request(reqwest::Method::DELETE, url_to(Some(path.clone())))
+        .send()
+        .expect(&format!("get {}", path));
 
-    let request = warp::test::request()
-        .path(&format!("/recs/id/{id}/", id = id_to_delete))
-        .method("GET")
-        .reply(&retrieve_filter)
-        .await;
-    assert_eq!(request.status(), StatusCode::GONE);
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
 
-    let response = reqwest::get(recording_url)
-        .await
-        .expect("make request for deleted recording to store");
+    let path = format!("id/{id}/", id = id_to_delete);
+    let response =
+        reqwest::blocking::get(url_to(Some(path.clone()))).expect(&format!("get /{}", path));
+    assert_eq!(response.status(), StatusCode::GONE);
+
+    let response =
+        reqwest::blocking::get(recording_url).expect("make request for deleted recording to store");
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
-    let request = warp::test::request()
-        .path(&format!("/recs/id/{id}/children/", id = parent))
-        .method("GET")
-        .reply(&make_children_filter("test_deletion").await)
-        .await;
-    assert_eq!(request.status(), StatusCode::OK);
-    let returned_ids = parse_children_ids(request.body());
+    let path = format!("id/{id}/children", id = parent);
+    let response =
+        reqwest::blocking::get(url_to(Some(path.clone()))).expect(&format!("get /{}", path));
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let returned_ids = parse_children_ids(&response.bytes().expect("get response body as string"));
     assert_eq!(
         ids.iter()
             .cloned()
@@ -498,32 +585,28 @@ async fn test_deletion(id_to_delete: &str, parent: &str, ids: &[String]) {
     );
 }
 
-async fn test_count() {
-    let count_filter = make_count_filter("test_updating").await;
-    let response = warp::test::request()
-        .path("/recs/count")
-        .method("GET")
-        .reply(&count_filter)
-        .await;
-    let count = String::from_utf8_lossy(response.body())
+fn test_count() {
+    let response = reqwest::blocking::get(url_to(Some("count".to_string()))).expect("get /count");
+    let count = response
+        .text()
+        .expect("get response body as string")
         .parse::<i64>()
         .expect("parse count response as i64");
 
     assert_eq!(count, 5);
 }
 
-async fn test_random() {
+fn test_random() {
     use std::collections::HashSet;
 
-    let random_filter = make_random_filter("test_random").await;
-    let response = warp::test::request()
-        .path("/recs/random/10")
-        .method("GET")
-        .reply(&random_filter)
-        .await;
+    let response =
+        reqwest::blocking::get(url_to(Some("random/10".to_string()))).expect("get /random/10");
+
     assert_eq!(response.status(), 200);
+
     let parsed: RandomResponse =
-        serde_json::from_slice(response.body()).expect("deserialize retrieved recording");
+        serde_json::from_slice(&response.bytes().expect("get response body as bytes"))
+            .expect("deserialize retrieved recording");
     let recordings = parsed
         .recordings
         .into_iter()
@@ -533,165 +616,55 @@ async fn test_random() {
     assert_eq!(recordings.len(), 5);
 }
 
-async fn test_token(token_id: String, parent_id: String) {
+fn test_token(token_id: String, parent_id: String) {
     use uuid::Uuid;
-
-    let token_filter = make_token_filter("test_token_parent").await;
 
     {
         let uuid = Uuid::new_v4();
-        let response = warp::test::request()
-            .path(&format!("/recs/token/{}/", uuid))
-            .method("GET")
-            .reply(&token_filter)
-            .await;
+        let path = format!("token/{}/", uuid);
+        let response =
+            reqwest::blocking::get(url_to(Some(path.clone()))).expect(&format!("get {}", path));
         assert_eq!(response.status(), 404);
     }
 
     {
-        let response = warp::test::request()
-            .path(&format!("/recs/token/{}/", token_id))
-            .method("GET")
-            .reply(&token_filter)
-            .await;
+        let path = format!("token/{}/", token_id);
+        let response =
+            reqwest::blocking::get(url_to(Some(path.clone()))).expect(&format!("get {}", path));
         assert_eq!(response.status(), 200);
 
         let parsed: TokenResponse =
-            serde_json::from_slice(response.body()).expect("deserialize token response");
+            serde_json::from_slice(&response.bytes().expect("get response body as bytes"))
+                .expect("deserialize token response");
 
         assert_eq!(parsed.parent_id, parent_id);
     }
 }
 
-#[tokio::test]
-async fn bad_uploads_fail() {
-    use bytes::Bytes;
-
-    fn assert_failed(
-        response: warp::http::Response<Bytes>,
-        expected_status: u16,
-        verify_error_type: &dyn Fn(StatusCode) -> bool,
-    ) {
-        let status = response.status();
-        assert!(verify_error_type(status));
-        assert_eq!(status.as_u16(), expected_status);
-    }
-
-    let filter = make_upload_filter("bad_uploads_fail").await;
-
+fn test_bad_uploads() {
     {
-        // should fail because of `content-type`
-        let response = warp::test::request()
-            .path("/recs/")
-            .method("POST")
+        let response = reqwest::blocking::Client::new()
+            .request(reqwest::Method::POST, url_to(None))
             .header("content-type", "text/plain")
             .header("content-length", 0)
-            .reply(&filter)
-            .await;
+            .send()
+            .expect("make request");
 
-        assert_failed(response, 400, &|s: StatusCode| s.is_client_error());
+        // should fail because of `content-type`
+        let status = response.status();
+        assert!(status.is_client_error());
+        assert_eq!(status.as_u16(), 400);
     }
 }
 
-async fn test_non_existent_recording() {
+fn test_non_existent_recording() {
     use uuid::Uuid;
 
-    let retrieve_filter = make_retrieve_filter("api_works").await;
-    let request = warp::test::request()
-        .path(&format!("/recs/id/{id}/", id = Uuid::new_v4()))
-        .method("GET")
-        .reply(&retrieve_filter)
-        .await;
+    let path = format!("id/{id}", id = Uuid::new_v4());
+    let response =
+        reqwest::blocking::get(url_to(Some(path.clone()))).expect(&format!("get {}", path));
 
-    assert_eq!(request.status(), StatusCode::NOT_FOUND)
-}
-
-async fn make_formats_filter<'a>(
-    test_name: impl Into<String>,
-) -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::reject::Rejection> + 'a {
-    let environment = make_environment(test_name.into()).await;
-
-    routes::make_formats_route(environment)
-}
-
-async fn make_upload_filter<'a>(
-    test_name: impl Into<String>,
-) -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::reject::Rejection> + 'a {
-    let environment = make_environment(test_name.into()).await;
-
-    routes::make_upload_route(environment)
-}
-
-async fn make_delete_filter<'a>(
-    test_name: impl Into<String>,
-) -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::reject::Rejection> + 'a {
-    let environment = make_environment(test_name.into()).await;
-
-    routes::make_delete_route(environment)
-}
-
-async fn make_children_filter<'a>(
-    test_name: impl Into<String>,
-) -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::reject::Rejection> + 'a {
-    let environment = make_environment(test_name.into()).await;
-
-    routes::make_children_route(environment)
-}
-
-async fn make_retrieve_filter<'a>(
-    test_name: impl Into<String>,
-) -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::reject::Rejection> + 'a {
-    let environment = make_environment(test_name.into()).await;
-
-    routes::make_retrieve_route(environment)
-}
-
-async fn make_count_filter<'a>(
-    test_name: impl Into<String>,
-) -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::reject::Rejection> + 'a {
-    let environment = make_environment(test_name.into()).await;
-
-    routes::make_count_route(environment)
-}
-
-async fn make_ages_list_filter<'a>(
-    test_name: impl Into<String>,
-) -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::reject::Rejection> + 'a {
-    let environment = make_environment(test_name.into()).await;
-
-    routes::make_ages_list_route(environment)
-}
-
-async fn make_categories_list_filter<'a>(
-    test_name: impl Into<String>,
-) -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::reject::Rejection> + 'a {
-    let environment = make_environment(test_name.into()).await;
-
-    routes::make_categories_list_route(environment)
-}
-
-async fn make_genders_list_filter<'a>(
-    test_name: impl Into<String>,
-) -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::reject::Rejection> + 'a {
-    let environment = make_environment(test_name.into()).await;
-
-    routes::make_genders_list_route(environment)
-}
-
-async fn make_random_filter<'a>(
-    test_name: impl Into<String>,
-) -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::reject::Rejection> + 'a {
-    let environment = make_environment(test_name.into()).await;
-
-    routes::make_random_route(environment)
-}
-
-async fn make_token_filter<'a>(
-    test_name: impl Into<String>,
-) -> impl warp::Filter<Extract = (impl warp::Reply,), Error = warp::reject::Rejection> + 'a {
-    let environment = make_environment(test_name.into()).await;
-
-    routes::make_token_route(environment)
+    assert_eq!(response.status(), StatusCode::NOT_FOUND)
 }
 
 fn parse_children_ids(body: &[u8]) -> Vec<String> {
@@ -718,71 +691,23 @@ fn parse_children_ids(body: &[u8]) -> Vec<String> {
         .collect::<Vec<_>>()
 }
 
-async fn make_environment(test_name: String) -> Environment<()> {
-    read_config();
-    initialize_global_logger();
-
-    let logger = slog_scope::logger().new(o!("test" => test_name));
-    let logger_arc = Arc::new(logger);
-
-    let checker = make_wrapper_for_test(logger_arc.clone());
-    let db = make_db().await;
-
-    let config = Config::new(TOKENS_PER_RECORDING);
-
-    Environment::new(
-        logger_arc,
-        Arc::new(db),
-        Arc::new(Urls::new("https://www.example.com/", "recs")),
-        Arc::new(make_store()),
-        Arc::new(checker),
-        config,
-    )
-}
-
-fn make_store() -> S3Store {
-    S3Store::from_env().expect("initialize S3 store")
-}
-
-fn initialize_global_logger() {
-    SLOG_SCOPE_GUARD.get_or_init(|| slog_envlogger::init().expect("initialize slog-envlogger"));
-}
-
-fn read_config() {
-    static INITIALIZED_CONFIG: Once = Once::new();
-
-    INITIALIZED_CONFIG.call_once(|| {
-        dotenv::dotenv().ok();
-    });
-}
-
 fn upload_file(
     path: impl AsRef<Path>,
     content_type: &str,
     boundary: &[u8],
     metadata: &[u8],
-) -> warp::test::RequestBuilder {
+) -> reqwest::blocking::Response {
     let data = fs::read(path.as_ref())
         .unwrap_or_else(|_| panic!("read file {:?}", path.as_ref().display()));
     let body = make_multipart_body(boundary, metadata, &data);
 
-    warp::test::request()
-        .path("/recs/")
-        .method("POST")
+    reqwest::blocking::Client::new()
+        .request(reqwest::Method::POST, url_to(None))
         .header("content-type", content_type)
         .header("content-length", body.len())
         .body(body)
-}
-
-fn make_wrapper_for_test(
-    logger: Arc<Logger>,
-) -> impl Fn(&[u8]) -> Result<Vec<AudioFormat>, errors::BackendError> {
-    use backend::audio;
-
-    audio::make_wrapper(
-        logger.clone(),
-        get_ffprobe(env::var("BACKEND_FFPROBE_PATH").ok()),
-    )
+        .send()
+        .expect(&format!("upload {:?}", path.as_ref().display()))
 }
 
 fn verify_recording_data(recording: &RetrievalResponse, id: &str, parent_id: &str) {
@@ -807,32 +732,36 @@ fn verify_recording_data(recording: &RetrievalResponse, id: &str, parent_id: &st
     assert_eq!(recording.occupation, Some("something".to_owned()));
 }
 
-async fn make_db() -> impl Db {
-    use sqlx::Pool;
-    use tokio::task;
+fn url_to(path: Option<String>) -> Url {
+    lazy_static! {
+        static ref BASE_URL: Url = Url::parse(&format!(
+            "http://127.0.0.1:{}",
+            get_variable("BACKEND_PORT")
+        ))
+        .expect("parse URL");
+        static ref BASE_PATH: String = format!("{}/", RECORDINGS_PATH);
+    }
 
-    use backend::db::PgDb;
+    let base = BASE_URL
+        .join(&BASE_PATH)
+        .expect("join BASE_URL with BASE_PATH");
 
+    match path {
+        Some(p) => base
+            .join(&p)
+            .expect(&format!("must join {} to {}", BASE_URL.as_str(), p)),
+        _ => base,
+    }
+}
+
+async fn prepare_db() {
     let connection_string = get_variable("BACKEND_DB_CONNECTION_STRING");
-    let pool = Pool::new(&connection_string)
-        .await
-        .expect("create PgPool from BACKEND_DB_CONNECTION_STRING");
 
-    static INITIALIZED_DB: Once = Once::new();
-
-    task::spawn_blocking(move || {
-        INITIALIZED_DB.call_once(|| {
-            let connection_string = connection_string.clone();
-
-            if env::var("BACKEND_TEST_INITIALIZE_DB").unwrap_or_else(|_| "0".to_owned()) == "1" {
-                initialize_db_for_test(&connection_string);
-            }
-        });
-    })
-    .await
-    .expect("must spawn blocking task");
-
-    PgDb::new(pool)
+    if env::var("BACKEND_TEST_INITIALIZE_DB").unwrap_or_else(|_| "0".to_owned()) == "1" {
+        tokio::task::spawn_blocking(move || initialize_db_for_test(&connection_string))
+            .await
+            .expect("initialize DB");
+    }
 }
 
 fn initialize_db_for_test(connection_string: &str) {

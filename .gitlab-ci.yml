@@ -1,7 +1,8 @@
 variables:
   CARGO_INCREMENTAL: 0
-  RUST_VERSION: 1.49.0
+  FFMPEG_VERSION: 4.3.1
   POSTGRES_VERSION: 12
+  RUST_VERSION: 1.49.0
   KANIKO_AUTH_CONFIG: >-
       {
         "auths": {
@@ -33,7 +34,7 @@ test:
   services:
     - postgres:12.3-alpine@sha256:4c5db602c06b811737746e4564040e554ba68cd2ded46a736cbe1af3a638ed0a
     - adobe/s3mock:2.1.24@sha256:f444c12e38050dcf339e8784cacfa40d14a4876503d2818982acb7f117ef03df
-  image: rust:${RUST_VERSION}-slim
+  image: rust:${RUST_VERSION}-alpine
   cache:
     paths:
       - .cargo
@@ -71,8 +72,11 @@ test:
     BACKEND_MEDIA_FORMAT: ogg
     BACKEND_FFPROBE_PATH: ffprobe
     BACKEND_TEST_INITIALIZE_DB: 1
+    BACKEND_TESTING_INITIALIZATION_TIMEOUT_SECONDS: 10
     BACKEND_BASE_URL: https://www.example.com/
     BACKEND_RECORDINGS_PATH: recordings
+    BACKEND_PORT: 50001
+    BACKEND_ADMIN_PORT: 50002
 
     POSTGRES_USER: postgres
     POSTGRES_PASSWORD: 1234     # used by postgres container
@@ -82,18 +86,18 @@ test:
 
     BACKEND_DB_CONNECTION_STRING: "postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$POSTGRES_DB_NAME"
 
-    # equivalent to #![deny(warnings)]
-    RUSTFLAGS: "-D warnings"
+    # -D warnings = #![deny(warnings)]
+    RUSTFLAGS: "-D warnings -C target-feature=-crt-static"
   before_script:
     # TODO also test with `ffmpeg-next`
-    - apt-get -o=Dpkg::Use-Pty=0 -qqy update && apt-get -o=Dpkg::Use-Pty=0 -qqy install libssl-dev pkg-config ffmpeg libsqlite3-dev postgresql-client
+    - apk add -q openssl-dev ffmpeg sqlite-dev postgresql-client musl-dev
     - PGPASSWORD=$POSTGRES_PASSWORD createdb -h $POSTGRES_HOST -p $POSTGRES_PORT -U $POSTGRES_USER $POSTGRES_DB_NAME
-    - rustup default stable
+    - rustup default $RUST_VERSION
     - rustup component add clippy
   script:
     - cargo fetch
-    - cargo clippy --release --frozen
-    - cargo test --release --frozen --no-fail-fast
+    - cargo clippy --frozen
+    - cargo test --frozen --no-fail-fast
   only:
     - merge_requests
   interruptible: yes
@@ -127,7 +131,7 @@ docker:
     - export build_timestamp=`date +%Y%m%d%H%M%S`
     - export tag=`echo $(cat .gitlab-ci-timestamp)`
     - echo $tag
-    - /kaniko/executor --context $CI_PROJECT_DIR --dockerfile $CI_PROJECT_DIR/Dockerfile --cache=true --destination=$CI_REGISTRY_IMAGE:$tag --destination=$CI_REGISTRY_IMAGE:latest --build-arg BASE_IMAGE=$CI_REGISTRY_IMAGE/base:$tag --build-arg REVISION=$CI_COMMIT_SHA --build-arg TIMESTAMP=$build_timestamp
+    - /kaniko/executor --context $CI_PROJECT_DIR --dockerfile $CI_PROJECT_DIR/Dockerfile --cache=true --destination=$CI_REGISTRY_IMAGE:$tag --destination=$CI_REGISTRY_IMAGE:latest --build-arg BASE_IMAGE=$CI_REGISTRY_IMAGE/base:$tag --build-arg FFMPEG_VERSION=$FFMPEG_VERSION --build-arg REVISION=$CI_COMMIT_SHA --build-arg TIMESTAMP=$build_timestamp
   only:
     - master
   interruptible: yes

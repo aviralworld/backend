@@ -10,3 +10,6 @@ members = [
 lto = true
 codegen-units = 1
 incremental = false
+
+[profile.dev]
+debug = 0

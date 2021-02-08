@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS "recordings" (
     CONSTRAINT recordings_name UNIQUE (NAME)
 );
 
-CREATE INDEX "parent_index" ON "recordings" ("parent_id") WHERE "parent_id" IS NOT NULL;
+CREATE INDEX IF NOT EXISTS "parent_index" ON "recordings" ("parent_id") WHERE "parent_id" IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS "recording_tokens" (
    id uuid,

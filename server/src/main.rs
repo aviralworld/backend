@@ -56,7 +56,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             .parse()
             .expect("parse BACKEND_TOKENS_PER_RECORDING as u8"),
     );
-    let environment = Environment::new(logger, db, urls, store, checker, config);
+    let environment = Environment::new(logger.clone(), db, urls, store, checker, config);
 
     let formats_route = routes::make_formats_route(environment.clone());
     let ages_list_route = routes::make_ages_list_route(environment.clone());
@@ -80,7 +80,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .or(delete_route)
         .or(random_route)
         .or(retrieve_route)
-        .or(token_route);
+        .or(token_route)
+        .recover(move |r| routes::format_rejection(logger.clone(), r));
 
     let main_server = warp::serve(routes).run(([0, 0, 0, 0], main_port));
 
