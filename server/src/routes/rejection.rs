@@ -31,12 +31,6 @@ pub struct FlattenedRejection {
     pub(crate) message: String,
 }
 
-impl From<Rejection> for reject::Rejection {
-    fn from(e: Rejection) -> Self {
-        reject::custom(e)
-    }
-}
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(untagged)]
 pub enum Context {

@@ -85,7 +85,7 @@ async fn api_works() {
     }
     .await;
 
-    child.kill().expect("kill child process");
+    child.kill().await.expect("kill child process");
 
     if show_output {
         print_child_output(initial_output, child).await;
@@ -95,13 +95,13 @@ async fn api_works() {
 }
 
 async fn test_api() {
-    test_formats();
-    test_ages();
-    test_categories();
-    test_genders();
+    test_formats().await;
+    test_ages().await;
+    test_categories().await;
+    test_genders().await;
 
-    test_non_existent_recording();
-    test_bad_uploads();
+    test_non_existent_recording().await;
+    test_bad_uploads().await;
 
     let content_type = multipart_content_type(&BOUNDARY);
 
@@ -109,8 +109,8 @@ async fn test_api() {
     let base_path = Path::new(&cargo_dir);
     let file_path = base_path.join("tests").join("opus_file.ogg");
 
-    let (id, tokens) = test_upload(&file_path, &content_type);
-    test_duplicate_upload(&file_path, &content_type);
+    let (id, tokens) = test_upload(&file_path, &content_type).await;
+    test_duplicate_upload(&file_path, &content_type).await;
 
     let children: serde_json::Value = serde_json::from_reader(
         fs::File::open("tests/simple_metadata_children.json")
@@ -118,7 +118,7 @@ async fn test_api() {
     )
     .expect("parse simple_metadata_children.json");
 
-    let results = test_uploading_children(&file_path, &content_type, &id, tokens, children);
+    let results = test_uploading_children(&file_path, &content_type, &id, tokens, children).await;
 
     let id_to_delete = results[2].0.to_owned();
     test_deletion(
@@ -128,14 +128,15 @@ async fn test_api() {
             .iter()
             .map(|(id, _)| id.to_owned())
             .collect::<Vec<_>>(),
-    );
+    )
+    .await;
 
-    test_count();
+    test_count().await;
 
-    test_random();
+    test_random().await;
 
     let (id, tokens) = results[0].to_owned();
-    test_token(tokens[0].to_owned(), id);
+    test_token(tokens[0].to_owned(), id).await;
 }
 
 async fn start_server() -> (Child, Vec<String>) {
@@ -163,7 +164,7 @@ async fn start_server() -> (Child, Vec<String>) {
     if started {
         (child, output)
     } else {
-        child.kill().expect("kill child");
+        child.kill().await.expect("kill child");
         print_child_output(output, child).await;
         panic!("could not run child");
     }
@@ -174,9 +175,10 @@ async fn wait_for_server(child: &mut Child) -> (bool, ChildOutput) {
 
     use futures::future::{select, Either};
     use futures_timer::Delay;
-    use tokio::stream::StreamExt;
+    use tokio::pin;
+    use tokio_stream::{wrappers::LinesStream, StreamExt};
 
-    let lines = get_child_stderr(child);
+    let lines = LinesStream::new(get_child_stderr(child));
 
     let output = Arc::new(RwLock::new(vec![]));
 
@@ -200,6 +202,8 @@ async fn wait_for_server(child: &mut Child) -> (bool, ChildOutput) {
             .expect("parse BACKEND_TESTING_INITIALIZATION_TIMEOUT_SECONDS"),
     ));
 
+    pin!(initialization_future);
+
     match select(initialization_future, timeout).await {
         Either::Left((_, _)) => (true, output),
         Either::Right((_, _)) => (false, output),
@@ -208,7 +212,7 @@ async fn wait_for_server(child: &mut Child) -> (bool, ChildOutput) {
 
 fn get_child_stderr(
     child: &mut Child,
-) -> impl tokio::stream::Stream<Item = Result<String, std::io::Error>> + '_ {
+) -> tokio::io::Lines<tokio::io::BufReader<&mut tokio::process::ChildStderr>> {
     let stderr = child.stderr.as_mut().expect("get child stderr handle");
 
     use tokio::io::{AsyncBufReadExt, BufReader};
@@ -243,18 +247,20 @@ async fn print_child_output(initial_output: Vec<String>, child: Child) {
     .expect("write stderr");
 }
 
-fn test_formats() {
-    let response =
-        reqwest::blocking::get(url_to(Some("formats".to_string()))).expect("get /formats");
+async fn test_formats() {
+    let response = reqwest::get(url_to(Some("formats".to_string())))
+        .await
+        .expect("get /formats");
 
-    let formats =
-        serde_json::from_str::<Vec<String>>(&response.text().expect("get response body as string"))
-            .expect("parse response as Vec<String>");
+    let formats = serde_json::from_str::<Vec<String>>(
+        &response.text().await.expect("get response body as string"),
+    )
+    .expect("parse response as Vec<String>");
 
     assert_eq!(formats, vec!["audio/ogg; codec=opus", "audio/ogg"]);
 }
 
-fn test_ages() {
+async fn test_ages() {
     lazy_static! {
         static ref AGES: Vec<RelatedLabel> = {
             vec![
@@ -266,19 +272,21 @@ fn test_ages() {
         };
     }
 
-    let response = reqwest::blocking::get(url_to(Some("ages".to_string()))).expect("get /ages");
+    let response = reqwest::get(url_to(Some("ages".to_string())))
+        .await
+        .expect("get /ages");
 
     assert_eq!(response.status(), 200);
 
     let ages = serde_json::from_str::<Vec<RelatedLabel>>(
-        &response.text().expect("get response body as string"),
+        &response.text().await.expect("get response body as string"),
     )
     .expect("parse response as Vec<RelatedLabel>");
 
     assert_eq!(ages, *AGES);
 }
 
-fn test_categories() {
+async fn test_categories() {
     lazy_static! {
         static ref CATEGORIES: Vec<RelatedLabel> = {
             vec![
@@ -303,19 +311,21 @@ and spaces in it"
         };
     }
 
-    let response =
-        reqwest::blocking::get(url_to(Some("categories".to_string()))).expect("get /categories");
+    let response = reqwest::get(url_to(Some("categories".to_string())))
+        .await
+        .expect("get /categories");
 
     assert_eq!(response.status(), 200);
 
-    let categories =
-        serde_json::from_str::<Vec<RelatedLabel>>(&response.text().expect("get response body"))
-            .expect("parse response as Vec<RelatedLabel>");
+    let categories = serde_json::from_str::<Vec<RelatedLabel>>(
+        &response.text().await.expect("get response body"),
+    )
+    .expect("parse response as Vec<RelatedLabel>");
 
     assert_eq!(categories, *CATEGORIES);
 }
 
-fn test_genders() {
+async fn test_genders() {
     lazy_static! {
         static ref GENDERS: Vec<RelatedLabel> = {
             vec![
@@ -327,19 +337,21 @@ fn test_genders() {
         };
     }
 
-    let response =
-        reqwest::blocking::get(url_to(Some("genders".to_string()))).expect("get /genders");
+    let response = reqwest::get(url_to(Some("genders".to_string())))
+        .await
+        .expect("get /genders");
 
     assert_eq!(response.status(), 200);
 
-    let genders =
-        serde_json::from_str::<Vec<RelatedLabel>>(&response.text().expect("get response body"))
-            .expect("parse response as Vec<RelatedLabel>");
+    let genders = serde_json::from_str::<Vec<RelatedLabel>>(
+        &response.text().await.expect("get response body"),
+    )
+    .expect("parse response as Vec<RelatedLabel>");
 
     assert_eq!(genders, *GENDERS);
 }
 
-fn test_upload(
+async fn test_upload(
     file_path: impl AsRef<Path>,
     content_type: impl AsRef<str>,
 ) -> (String, Vec<String>) {
@@ -350,7 +362,8 @@ fn test_upload(
         content_type.as_ref(),
         BOUNDARY.as_bytes(),
         &bytes,
-    );
+    )
+    .await;
 
     assert_eq!(response.status(), StatusCode::CREATED);
 
@@ -373,7 +386,7 @@ fn test_upload(
     assert_eq!(segments.len(), 2);
 
     let response = serde_json::from_str::<CreationResponse>(
-        &response.text().expect("get response body as string"),
+        &response.text().await.expect("get response body as string"),
     )
     .expect("parse response as JSON");
 
@@ -392,7 +405,7 @@ fn test_upload(
     (id, tokens)
 }
 
-fn test_duplicate_upload(file_path: impl AsRef<Path>, content_type: impl AsRef<str>) {
+async fn test_duplicate_upload(file_path: impl AsRef<Path>, content_type: impl AsRef<str>) {
     // ensure the token cannot be reused
     {
         let bytes = fs::read("tests/simple_metadata_with_same_token.json")
@@ -403,12 +416,13 @@ fn test_duplicate_upload(file_path: impl AsRef<Path>, content_type: impl AsRef<s
             content_type.as_ref(),
             BOUNDARY.as_bytes(),
             &bytes,
-        );
+        )
+        .await;
 
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 
         let deserialized: CreationResponse =
-            serde_json::from_str(&response.text().expect("get response body as string"))
+            serde_json::from_str(&response.text().await.expect("get response body as string"))
                 .expect("parse response as JSON");
         assert!(
             deserialized.id.is_none(),
@@ -430,12 +444,13 @@ fn test_duplicate_upload(file_path: impl AsRef<Path>, content_type: impl AsRef<s
             content_type.as_ref(),
             BOUNDARY.as_bytes(),
             &bytes,
-        );
+        )
+        .await;
 
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
 
         let deserialized: CreationResponse =
-            serde_json::from_str(&response.text().expect("get response body as string"))
+            serde_json::from_str(&response.text().await.expect("get response body as string"))
                 .expect("parse response as JSON");
         assert!(
             deserialized.id.is_none(),
@@ -449,7 +464,7 @@ fn test_duplicate_upload(file_path: impl AsRef<Path>, content_type: impl AsRef<s
     }
 }
 
-fn test_uploading_children(
+async fn test_uploading_children(
     file_path: impl AsRef<Path>,
     content_type: impl AsRef<str>,
     parent: &str,
@@ -467,7 +482,8 @@ fn test_uploading_children(
             content_type.as_ref(),
             tokens.pop().unwrap(),
             &mut child,
-        );
+        )
+        .await;
 
         if let Some((id, tokens)) = result {
             results.push((id, tokens));
@@ -476,13 +492,14 @@ fn test_uploading_children(
 
     {
         let path = format!("id/{id}/children/", id = parent);
-        let response = reqwest::blocking::get(url_to(Some(path.to_string())))
+        let response = reqwest::get(url_to(Some(path.to_string())))
+            .await
             .expect(&format!("get {path}", path = path));
 
         assert_eq!(response.status(), StatusCode::OK);
 
         let returned_ids =
-            parse_children_ids(&response.bytes().expect("get response body as bytes"));
+            parse_children_ids(&response.bytes().await.expect("get response body as bytes"));
         assert_eq!(
             results.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>(),
             returned_ids
@@ -492,7 +509,7 @@ fn test_uploading_children(
     results
 }
 
-fn test_uploading_child(
+async fn test_uploading_child(
     file_path: impl AsRef<Path>,
     content_type: impl AsRef<str>,
     token: String,
@@ -507,12 +524,13 @@ fn test_uploading_child(
         content_type.as_ref(),
         BOUNDARY.as_bytes(),
         &bytes,
-    );
+    )
+    .await;
 
     assert_eq!(response.status(), StatusCode::CREATED);
 
     let response = serde_json::from_str::<CreationResponse>(
-        &response.text().expect("get response body as string"),
+        &response.text().await.expect("get response body as string"),
     )
     .expect("parse response as JSON");
 
@@ -522,15 +540,16 @@ fn test_uploading_child(
     Some((id, tokens))
 }
 
-fn test_deletion(id_to_delete: &str, parent: &str, ids: &[String]) {
+async fn test_deletion(id_to_delete: &str, parent: &str, ids: &[String]) {
     let path = format!("id/{id}/", id = id_to_delete);
-    let response =
-        reqwest::blocking::get(url_to(Some(path.clone()))).expect(&format!("get /{}", path));
+    let response = reqwest::get(url_to(Some(path.clone())))
+        .await
+        .expect(&format!("get /{}", path));
 
     assert_eq!(response.status(), StatusCode::OK);
 
     let recording: RetrievalResponse =
-        serde_json::from_slice(&response.bytes().expect("get response body as string"))
+        serde_json::from_slice(&response.bytes().await.expect("get response body as string"))
             .expect("deserialize retrieved recording");
     verify_recording_data(&recording, id_to_delete, parent);
 
@@ -538,7 +557,8 @@ fn test_deletion(id_to_delete: &str, parent: &str, ids: &[String]) {
     let recording_url = &recording.url;
 
     {
-        let response = reqwest::blocking::get(recording_url)
+        let response = reqwest::get(recording_url)
+            .await
             .expect("verify recording exists in store before deleting");
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(
@@ -552,30 +572,35 @@ fn test_deletion(id_to_delete: &str, parent: &str, ids: &[String]) {
         );
     }
 
-    let client = reqwest::blocking::Client::new();
+    let client = reqwest::Client::new();
     let path = format!("id/{id}/", id = id_to_delete);
     let response = client
         .request(reqwest::Method::DELETE, url_to(Some(path.clone())))
         .send()
+        .await
         .expect(&format!("get {}", path));
 
     assert_eq!(response.status(), StatusCode::NO_CONTENT);
 
     let path = format!("id/{id}/", id = id_to_delete);
-    let response =
-        reqwest::blocking::get(url_to(Some(path.clone()))).expect(&format!("get /{}", path));
+    let response = reqwest::get(url_to(Some(path.clone())))
+        .await
+        .expect(&format!("get /{}", path));
     assert_eq!(response.status(), StatusCode::GONE);
 
-    let response =
-        reqwest::blocking::get(recording_url).expect("make request for deleted recording to store");
+    let response = reqwest::get(recording_url)
+        .await
+        .expect("make request for deleted recording to store");
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
     let path = format!("id/{id}/children", id = parent);
-    let response =
-        reqwest::blocking::get(url_to(Some(path.clone()))).expect(&format!("get /{}", path));
+    let response = reqwest::get(url_to(Some(path.clone())))
+        .await
+        .expect(&format!("get /{}", path));
 
     assert_eq!(response.status(), StatusCode::OK);
-    let returned_ids = parse_children_ids(&response.bytes().expect("get response body as string"));
+    let returned_ids =
+        parse_children_ids(&response.bytes().await.expect("get response body as string"));
     assert_eq!(
         ids.iter()
             .cloned()
@@ -585,10 +610,13 @@ fn test_deletion(id_to_delete: &str, parent: &str, ids: &[String]) {
     );
 }
 
-fn test_count() {
-    let response = reqwest::blocking::get(url_to(Some("count".to_string()))).expect("get /count");
+async fn test_count() {
+    let response = reqwest::get(url_to(Some("count".to_string())))
+        .await
+        .expect("get /count");
     let count = response
         .text()
+        .await
         .expect("get response body as string")
         .parse::<i64>()
         .expect("parse count response as i64");
@@ -596,16 +624,17 @@ fn test_count() {
     assert_eq!(count, 5);
 }
 
-fn test_random() {
+async fn test_random() {
     use std::collections::HashSet;
 
-    let response =
-        reqwest::blocking::get(url_to(Some("random/10".to_string()))).expect("get /random/10");
+    let response = reqwest::get(url_to(Some("random/10".to_string())))
+        .await
+        .expect("get /random/10");
 
     assert_eq!(response.status(), 200);
 
     let parsed: RandomResponse =
-        serde_json::from_slice(&response.bytes().expect("get response body as bytes"))
+        serde_json::from_slice(&response.bytes().await.expect("get response body as bytes"))
             .expect("deserialize retrieved recording");
     let recordings = parsed
         .recordings
@@ -616,38 +645,41 @@ fn test_random() {
     assert_eq!(recordings.len(), 5);
 }
 
-fn test_token(token_id: String, parent_id: String) {
+async fn test_token(token_id: String, parent_id: String) {
     use uuid::Uuid;
 
     {
         let uuid = Uuid::new_v4();
         let path = format!("token/{}/", uuid);
-        let response =
-            reqwest::blocking::get(url_to(Some(path.clone()))).expect(&format!("get {}", path));
+        let response = reqwest::get(url_to(Some(path.clone())))
+            .await
+            .expect(&format!("get {}", path));
         assert_eq!(response.status(), 404);
     }
 
     {
         let path = format!("token/{}/", token_id);
-        let response =
-            reqwest::blocking::get(url_to(Some(path.clone()))).expect(&format!("get {}", path));
+        let response = reqwest::get(url_to(Some(path.clone())))
+            .await
+            .expect(&format!("get {}", path));
         assert_eq!(response.status(), 200);
 
         let parsed: TokenResponse =
-            serde_json::from_slice(&response.bytes().expect("get response body as bytes"))
+            serde_json::from_slice(&response.bytes().await.expect("get response body as bytes"))
                 .expect("deserialize token response");
 
         assert_eq!(parsed.parent_id, parent_id);
     }
 }
 
-fn test_bad_uploads() {
+async fn test_bad_uploads() {
     {
-        let response = reqwest::blocking::Client::new()
+        let response = reqwest::Client::new()
             .request(reqwest::Method::POST, url_to(None))
             .header("content-type", "text/plain")
             .header("content-length", 0)
             .send()
+            .await
             .expect("make request");
 
         // should fail because of `content-type`
@@ -657,12 +689,13 @@ fn test_bad_uploads() {
     }
 }
 
-fn test_non_existent_recording() {
+async fn test_non_existent_recording() {
     use uuid::Uuid;
 
     let path = format!("id/{id}", id = Uuid::new_v4());
-    let response =
-        reqwest::blocking::get(url_to(Some(path.clone()))).expect(&format!("get {}", path));
+    let response = reqwest::get(url_to(Some(path.clone())))
+        .await
+        .expect(&format!("get {}", path));
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND)
 }
@@ -691,22 +724,23 @@ fn parse_children_ids(body: &[u8]) -> Vec<String> {
         .collect::<Vec<_>>()
 }
 
-fn upload_file(
+async fn upload_file(
     path: impl AsRef<Path>,
     content_type: &str,
     boundary: &[u8],
     metadata: &[u8],
-) -> reqwest::blocking::Response {
+) -> reqwest::Response {
     let data = fs::read(path.as_ref())
         .unwrap_or_else(|_| panic!("read file {:?}", path.as_ref().display()));
     let body = make_multipart_body(boundary, metadata, &data);
 
-    reqwest::blocking::Client::new()
+    reqwest::Client::new()
         .request(reqwest::Method::POST, url_to(None))
         .header("content-type", content_type)
         .header("content-length", body.len())
         .body(body)
         .send()
+        .await
         .expect(&format!("upload {:?}", path.as_ref().display()))
 }
 

@@ -67,7 +67,7 @@ pub async fn part_as_vec(raw: Part) -> Result<Vec<u8>, ()> {
 /// Collects raw data from [`Part`].
 pub fn part_as_stream(raw: Part) -> impl futures::Stream<Item = Result<Bytes, io::Error>> {
     raw.stream().map(|r| {
-        r.map(|mut x| x.to_bytes())
+        r.map(|mut x| x.copy_to_bytes(x.remaining()))
             .map_err(|_| io::Error::new(io::ErrorKind::Other, "could not retrieve chunk"))
     })
 }

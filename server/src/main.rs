@@ -40,8 +40,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let ffprobe_path = get_ffprobe(env::var("BACKEND_FFPROBE_PATH").ok());
     let checker = Arc::new(audio::make_wrapper(logger.clone(), ffprobe_path));
 
+    info!(logger, "Creating database pool...");
     let connection_string = get_variable("BACKEND_DB_CONNECTION_STRING");
-    let pool = sqlx::Pool::new(&connection_string)
+    let pool = sqlx::Pool::connect(&connection_string)
         .await
         .expect("create database pool from BACKEND_DB_CONNECTION_STRING");
     let db = Arc::new(PgDb::new(pool));

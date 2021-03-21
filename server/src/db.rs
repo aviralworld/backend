@@ -68,7 +68,6 @@ mod postgres {
     use sqlx::{
         self,
         postgres::{PgPool, PgRow},
-        Postgres, QueryAs,
     };
     use time::OffsetDateTime;
     use url::Url;
@@ -102,8 +101,6 @@ mod postgres {
             let id = *id;
 
             async move {
-                use sqlx::prelude::*;
-
                 let query = sqlx::query_as::<_, ChildRecording>(include_str!(
                     "queries/retrieve_children.sql"
                 ));
@@ -121,8 +118,6 @@ mod postgres {
 
         fn count_all(&self) -> BoxFuture<Result<i64, BackendError>> {
             async move {
-                use sqlx::prelude::*;
-
                 let query = sqlx::query_as::<_, (i64,)>(include_str!("queries/count.sql"));
 
                 let (count,) = query.fetch_one(&self.pool).await.map_err(map_sqlx_error)?;
@@ -136,12 +131,9 @@ mod postgres {
             let parent_id = *parent;
 
             async move {
-                use sqlx::prelude::*;
+                let query = sqlx::query_as(include_str!("queries/create_token.sql"));
 
-                let query: QueryAs<Postgres, (Uuid,)> =
-                    sqlx::query_as(include_str!("queries/create_token.sql"));
-
-                let (token,) = query
+                let (token,): (Uuid,) = query
                     .bind(parent_id)
                     .fetch_one(&self.pool)
                     .await
@@ -162,7 +154,8 @@ mod postgres {
                     .bind(id)
                     .execute(&self.pool)
                     .await
-                    .map_err(map_sqlx_error)?;
+                    .map_err(map_sqlx_error)?
+                    .rows_affected();
 
                 if count == 0 {
                     Err(BackendError::NonExistentId(id))
@@ -181,12 +174,9 @@ mod postgres {
             let parent_id = *parent_id;
 
             async move {
-                use sqlx::prelude::*;
+                let query = sqlx::query_as(include_str!("queries/create.sql"));
 
-                let query: QueryAs<Postgres, (Uuid, OffsetDateTime, OffsetDateTime)> =
-                    sqlx::query_as(include_str!("queries/create.sql"));
-
-                let (id, created_at, updated_at) = query
+                let (id, created_at, updated_at): (Uuid, OffsetDateTime, OffsetDateTime) = query
                     .bind(&DEFAULT_URL)
                     .bind(None::<Option<i16>>)
                     .bind(&metadata.category_id)
@@ -209,12 +199,9 @@ mod postgres {
             let token = *token;
 
             async move {
-                use sqlx::prelude::*;
+                let query = sqlx::query_as(include_str!("queries/lock_token.sql"));
 
-                let query: QueryAs<Postgres, (Uuid,)> =
-                    sqlx::query_as(include_str!("queries/lock_token.sql"));
-
-                let parent_id = query
+                let parent_id: Option<Uuid> = query
                     .bind(token)
                     .fetch_optional(&self.pool)
                     .await
@@ -577,10 +564,10 @@ mod postgres {
         use sqlx::Error;
 
         match error {
-            Error::Database(ref e) if e.constraint_name() == Some(RECORDINGS_ID_CONSTRAINT) => {
+            Error::Database(ref e) if e.constraint() == Some(RECORDINGS_ID_CONSTRAINT) => {
                 BackendError::IdAlreadyExists
             }
-            Error::Database(ref e) if e.constraint_name() == Some(RECORDINGS_NAME_CONSTRAINT) => {
+            Error::Database(ref e) if e.constraint() == Some(RECORDINGS_NAME_CONSTRAINT) => {
                 BackendError::NameAlreadyExists
             }
             _ => BackendError::Sqlx { source: error },
