@@ -31,12 +31,6 @@ pub struct FlattenedRejection {
     pub(crate) message: String,
 }
 
-impl From<Rejection> for reject::Rejection {
-    fn from(e: Rejection) -> Self {
-        reject::custom(e)
-    }
-}
-
 #[derive(Clone, Debug, Serialize)]
 #[serde(untagged)]
 pub enum Context {
@@ -47,7 +41,6 @@ pub enum Context {
     Delete { id: String },
     Formats,
     Genders,
-    Hide { id: String },
     Random { count: i16 },
     Retrieve { id: String },
     Token { id: String },
@@ -81,10 +74,6 @@ impl Context {
 
     pub fn genders() -> Context {
         Context::Genders
-    }
-
-    pub fn hide(id: String) -> Context {
-        Context::Hide { id }
     }
 
     pub fn random(count: i16) -> Context {
