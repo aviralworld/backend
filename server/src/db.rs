@@ -269,7 +269,7 @@ mod postgres {
 
                         Ok(match deleted_at {
                             Some(deleted_at) => {
-                                new_deleted_recording(id, times, deleted_at, parent_id)?
+                                new_deleted_recording(id, times, deleted_at, parent_id)
                             }
                             None => new_active_recording(id, times, parent_id, &row)?,
                         })
@@ -325,6 +325,7 @@ mod postgres {
             .boxed()
         }
 
+        #[allow(clippy::needless_question_mark)]
         fn retrieve_format_essences(&self) -> BoxFuture<Result<Vec<String>, BackendError>> {
             async move {
                 let query = sqlx::query(include_str!("queries/retrieve_format_essences.sql"));
@@ -526,12 +527,10 @@ mod postgres {
         times: Times,
         deleted_at: OffsetDateTime,
         parent_id: Option<Uuid>,
-    ) -> Result<Recording, sqlx::Error> {
+    ) -> Recording {
         use crate::recording::DeletedRecording;
 
-        Ok(Recording::Deleted(DeletedRecording::new(
-            id, times, deleted_at, parent_id,
-        )))
+        Recording::Deleted(DeletedRecording::new(id, times, deleted_at, parent_id))
     }
 
     fn try_get<'a, T: sqlx::Type<sqlx::Postgres> + sqlx::decode::Decode<'a, sqlx::Postgres>>(

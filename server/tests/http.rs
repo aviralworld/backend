@@ -713,7 +713,7 @@ fn parse_children_ids(body: &[u8]) -> Vec<String> {
     struct Child {
         id: String,
         name: String,
-    };
+    }
 
     let response: ChildrenResponse = serde_json::from_slice(body).expect("parse children response");
 
