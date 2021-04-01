@@ -65,7 +65,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let children_route = routes::make_children_route(environment.clone());
     let delete_route = routes::make_delete_route(environment.clone());
     let retrieve_route = routes::make_retrieve_route(environment.clone());
-    let retrieve_by_token_route = routes::make_retrieve_by_token_route(environment.clone());
+    let lookup_key_route = routes::make_lookup_key_route(environment.clone());
     let random_route = routes::make_random_route(environment.clone());
     let token_route = routes::make_token_route(environment.clone());
 
@@ -79,7 +79,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .or(delete_route)
         .or(random_route)
         .or(retrieve_route)
-        .or(retrieve_by_token_route)
+        .or(lookup_key_route)
         .or(token_route)
         .recover(move |r| routes::format_rejection(logger.clone(), r));
 

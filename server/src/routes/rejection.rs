@@ -41,9 +41,9 @@ pub enum Context {
     Delete { id: String },
     Formats,
     Genders,
+    LookupKey { token: String },
     Random { count: i16 },
     Retrieve { id: String },
-    RetrieveByToken { token: String },
     Token { id: String },
     Upload { id: Option<String> },
 }
@@ -77,16 +77,16 @@ impl Context {
         Context::Genders
     }
 
+    pub fn lookup_key(token: String) -> Context {
+        Context::LookupKey { token }
+    }
+
     pub fn random(count: i16) -> Context {
         Context::Random { count }
     }
 
     pub fn retrieve(id: String) -> Context {
         Context::Retrieve { id }
-    }
-
-    pub fn retrieve_by_token(token: String) -> Context {
-        Context::RetrieveByToken { token }
     }
 
     pub fn token(id: String) -> Context {

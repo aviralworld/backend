@@ -13,7 +13,7 @@ pub trait Db {
 
     fn count_all(&self) -> BoxFuture<Result<i64, BackendError>>;
 
-    fn create_management_token(
+    fn create_key(
         &self,
         id: &Uuid,
         email: Option<String>,
@@ -26,6 +26,8 @@ pub trait Db {
 
     fn lock_token(&self, token: &Uuid) -> BoxFuture<Result<Option<Uuid>, BackendError>>;
 
+    fn lookup_key(&self, key: &Uuid) -> BoxFuture<Result<Option<Uuid>, BackendError>>;
+
     fn insert(
         &self,
         parent_id: &Uuid,
@@ -35,9 +37,6 @@ pub trait Db {
     fn retrieve(&self, id: &Uuid) -> BoxFuture<Result<Option<Recording>, BackendError>>;
 
     fn retrieve_ages(&self) -> BoxFuture<Result<Vec<Label>, BackendError>>;
-
-    fn retrieve_by_token(&self, token: &Uuid)
-        -> BoxFuture<Result<Option<Recording>, BackendError>>;
 
     fn retrieve_categories(&self) -> BoxFuture<Result<Vec<Label>, BackendError>>;
 
@@ -137,7 +136,7 @@ mod postgres {
             .boxed()
         }
 
-        fn create_management_token(
+        fn create_key(
             &self,
             id: &Uuid,
             email: Option<String>,
@@ -145,7 +144,7 @@ mod postgres {
             let id = *id;
 
             async move {
-                let query = sqlx::query_as(include_str!("queries/create_management_token.sql"));
+                let query = sqlx::query_as(include_str!("queries/create_key.sql"));
 
                 let (token,): (Uuid,) = query
                     .bind(id)
@@ -224,7 +223,7 @@ mod postgres {
                     let mut errors = vec![];
                     // TODO return a composite result with all of these
                     if let Err(source) =
-                        sqlx::query(include_str!("queries/delete_management_token.sql"))
+                        sqlx::query(include_str!("queries/delete_key.sql"))
                             .bind(id)
                             .execute(&self.pool)
                             .await
@@ -307,9 +306,27 @@ mod postgres {
                     .fetch_optional(&self.pool)
                     .await
                     .map_err(map_sqlx_error)?
-                    .map(|(parent_id,)| parent_id);
+                    .map(|(x,)| x);
 
                 Ok(parent_id)
+            }
+            .boxed()
+        }
+
+        fn lookup_key(&self, key: &Uuid) -> BoxFuture<Result<Option<Uuid>, BackendError>> {
+            let key = *key;
+
+            async move {
+                let query = sqlx::query_as(include_str!("queries/lookup_key.sql"));
+
+                let id: Option<Uuid> = query
+                    .bind(key)
+                    .fetch_optional(&self.pool)
+                    .await
+                    .map_err(map_sqlx_error)?
+                    .map(|(x,)| x);
+
+                Ok(id)
             }
             .boxed()
         }
@@ -383,27 +400,6 @@ mod postgres {
                     .map_err(map_sqlx_error)?;
 
                 Ok(ages)
-            }
-            .boxed()
-        }
-
-        fn retrieve_by_token(
-            &self,
-            token: &Uuid,
-        ) -> BoxFuture<Result<Option<Recording>, BackendError>> {
-            let token = *token;
-
-            async move {
-                let query = sqlx::query(include_str!("queries/retrieve_by_token.sql"));
-
-                let recording: Option<Recording> = query
-                    .bind(token)
-                    .try_map(deserialize_recording)
-                    .fetch_optional(&self.pool)
-                    .await
-                    .map_err(map_sqlx_error)?;
-
-                Ok(recording)
             }
             .boxed()
         }

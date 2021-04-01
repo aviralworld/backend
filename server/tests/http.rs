@@ -17,7 +17,7 @@ struct CreationResponse {
     message: Option<String>,
     id: Option<String>,
     tokens: Option<Vec<String>>,
-    management_token: Option<String>,
+    key: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -48,6 +48,12 @@ struct RandomResponse {
 struct TokenResponse {
     id: String,
     parent_id: String,
+}
+
+#[derive(Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+struct LookupResponse {
+    id: String,
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -110,10 +116,10 @@ async fn test_api() {
     let base_path = Path::new(&cargo_dir);
     let file_path = base_path.join("tests").join("opus_file.ogg");
 
-    let (id, tokens, management_token) = test_upload(&file_path, &content_type).await;
+    let (id, tokens, key) = test_upload(&file_path, &content_type).await;
     test_duplicate_upload(&file_path, &content_type).await;
 
-    test_management_token(&id, management_token).await;
+    test_key(&id, key).await;
 
     let children: serde_json::Value = serde_json::from_reader(
         fs::File::open("tests/simple_metadata_children.json")
@@ -122,12 +128,12 @@ async fn test_api() {
     .expect("parse simple_metadata_children.json");
 
     let results = test_uploading_children(&file_path, &content_type, &id, tokens, children).await;
-    let (id_to_delete, recording_tokens_to_check, management_token_to_check) = &results[2];
+    let (id_to_delete, recording_tokens_to_check, key_to_check) = &results[2];
 
     test_deletion(
         id_to_delete,
         recording_tokens_to_check.to_vec(),
-        management_token_to_check.to_owned(),
+        key_to_check.to_owned(),
         &id,
         &results
             .iter()
@@ -416,11 +422,9 @@ async fn test_upload(
         "response must provide the correct number of tokens"
     );
 
-    let management_token = response
-        .management_token
-        .expect("get management token from response");
+    let key = response.key.expect("get key from response");
 
-    (id, tokens, management_token)
+    (id, tokens, key)
 }
 
 async fn test_duplicate_upload(file_path: impl AsRef<Path>, content_type: impl AsRef<str>) {
@@ -482,15 +486,15 @@ async fn test_duplicate_upload(file_path: impl AsRef<Path>, content_type: impl A
     }
 }
 
-async fn test_management_token(id: &str, token: String) {
-    let url = url_to(Some(format!("translate/{}/", token)));
+async fn test_key(id: &str, token: String) {
+    let url = url_to(Some(format!("lookup/{}/", token)));
     let response = reqwest::get(url.clone())
         .await
         .expect(&format!("get {}", url.as_str()));
 
-    let recording: RetrievalResponse =
+    let recording: LookupResponse =
         serde_json::from_slice(&response.bytes().await.expect("get response body as string"))
-            .expect("deserialize retrieved recording");
+            .expect("deserialize lookup response");
 
     assert_eq!(recording.id, id);
 }
@@ -570,15 +574,15 @@ async fn test_uploading_child(
 
     let id = response.id.unwrap();
     let tokens = response.tokens.unwrap();
-    let management_token = response.management_token.unwrap();
+    let key = response.key.unwrap();
 
-    Some((id, tokens, management_token))
+    Some((id, tokens, key))
 }
 
 async fn test_deletion(
     id_to_delete: &str,
     recording_tokens_to_check: Vec<String>,
-    management_token_to_check: String,
+    key_to_check: String,
     parent: &str,
     ids: &[String],
 ) {
@@ -659,12 +663,9 @@ async fn test_deletion(
     );
 
     {
-        let response = reqwest::get(url_to(Some(format!(
-            "translate/{}/",
-            management_token_to_check
-        ))))
-        .await
-        .expect("make request through management token");
+        let response = reqwest::get(url_to(Some(format!("lookup/{}/", key_to_check))))
+            .await
+            .expect("look up key");
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 }

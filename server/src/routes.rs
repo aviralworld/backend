@@ -32,6 +32,9 @@ enum SuccessResponse<'a> {
         timestamp: Option<&'a str>,
         version: &'a str,
     },
+    Lookup {
+        id: Uuid,
+    },
     Random {
         recordings: Vec<PartialRecording>,
     },
@@ -43,7 +46,7 @@ enum SuccessResponse<'a> {
         id: String,
         // TODO these should not be options
         tokens: Option<Vec<Uuid>>,
-        management_token: Option<Uuid>,
+        key: Option<Uuid>,
     },
 }
 
@@ -497,45 +500,35 @@ pub fn make_token_route<'a, O: Clone + Send + Sync + 'a>(
         .and_then(handler)
 }
 
-pub fn make_retrieve_by_token_route<'a, O: Clone + Send + Sync + 'a>(
+pub fn make_lookup_key_route<'a, O: Clone + Send + Sync + 'a>(
     environment: Environment<O>,
 ) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
     let recordings_path = environment.urls.recordings_path.clone();
 
-    let handler = move |token: String| -> BoxFuture<Result<WithStatus<Json>, reject::Rejection>> {
+    let handler = move |key: String| -> BoxFuture<Result<WithStatus<Json>, reject::Rejection>> {
         let environment = environment.clone();
 
         async move {
-            use crate::recording::Recording;
-
             let error_handler = |e: BackendError| {
-                rejection::Rejection::new(rejection::Context::retrieve_by_token(token.clone()), e)
+                rejection::Rejection::new(rejection::Context::lookup_key(key.clone()), e)
             };
 
-            let token = Uuid::parse_str(&token)
-                .map_err(|_| BackendError::InvalidId(token.clone()))
+            let key = Uuid::parse_str(&key)
+                .map_err(|_| BackendError::InvalidId(key.clone()))
                 .map_err(error_handler)?;
-            debug!(environment.logger, "Retrieving recording by management token..."; "token" => format!("{}", &token));
+            debug!(environment.logger, "Looking up key..."; "key" => format!("{}", key));
 
-            let option = environment.db.retrieve_by_token(&token).await.map_err(error_handler)?;
+            let option = environment.db.lookup_key(&key).await.map_err(error_handler)?;
 
             match option {
-                Some(recording) => {
-                    let status = match recording {
-                        Recording::Active(_) => StatusCode::OK,
-                        Recording::Deleted(_) => StatusCode::GONE,
-                    };
-
-                    Ok(with_status(json(&recording), status))
-                }
-                None => Ok(with_status(json(&()), StatusCode::NOT_FOUND)),
+                Some(id) => Ok(with_status(json(&SuccessResponse::Lookup { id }), StatusCode::OK)),
+                _ => Ok(with_status(json(&()), StatusCode::NOT_FOUND))
             }
-        }
-        .boxed()
+        }.boxed()
     };
 
     warp::path(recordings_path)
-        .and(warp::path("translate"))
+        .and(warp::path("lookup"))
         .and(warp::path::param::<String>())
         .and(warp::path::end())
         .and(warp::get())
@@ -656,8 +649,8 @@ async fn complete_upload<'a, O: Clone + Send + Sync + 'a>(
     .await
     .map_err(&error_handler)?;
 
-    let management_token = db
-        .create_management_token(&id, email)
+    let key = db
+        .create_key(&id, email)
         .await
         .map_err(&error_handler)?;
 
@@ -667,7 +660,7 @@ async fn complete_upload<'a, O: Clone + Send + Sync + 'a>(
     let response = SuccessResponse::Upload {
         id: id_as_str,
         tokens: Some(tokens),
-        management_token: Some(management_token),
+        key: Some(key),
     };
 
     Ok(with_header(
