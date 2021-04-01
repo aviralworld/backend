@@ -14,12 +14,10 @@ pub fn initialize_logger() -> slog::Logger {
     let drain = Mutex::new(Json::default(std::io::stderr())).map(Fuse);
     let drain = Async::new(drain).build().fuse();
 
-    let logger = Logger::root(
+    Logger::root(
         drain,
         o!("version" => info::VERSION, "revision" => info::REVISION, "build_timestamp" => info::BUILD_TIMESTAMP),
-    );
-
-    logger
+    )
 }
 
 #[cfg(feature = "env_logging")]

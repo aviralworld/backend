@@ -13,11 +13,8 @@ pub trait Db {
 
     fn count_all(&self) -> BoxFuture<Result<i64, BackendError>>;
 
-    fn create_key(
-        &self,
-        id: &Uuid,
-        email: Option<String>,
-    ) -> BoxFuture<Result<Uuid, BackendError>>;
+    fn create_key(&self, id: &Uuid, email: Option<String>)
+        -> BoxFuture<Result<Uuid, BackendError>>;
 
     fn create_token(&self, parent_id: &Uuid) -> BoxFuture<Result<Uuid, BackendError>>;
 
@@ -222,11 +219,10 @@ mod postgres {
                 } else {
                     let mut errors = vec![];
                     // TODO return a composite result with all of these
-                    if let Err(source) =
-                        sqlx::query(include_str!("queries/delete_key.sql"))
-                            .bind(id)
-                            .execute(&self.pool)
-                            .await
+                    if let Err(source) = sqlx::query(include_str!("queries/delete_key.sql"))
+                        .bind(id)
+                        .execute(&self.pool)
+                        .await
                     {
                         errors.push(BackendError::RecordingDeleteFailed {
                             id,
@@ -256,7 +252,7 @@ mod postgres {
                         });
                     }
 
-                    if errors.len() > 0 {
+                    if !errors.is_empty() {
                         Err(errors)
                     } else {
                         Ok(())

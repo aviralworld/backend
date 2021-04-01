@@ -131,7 +131,7 @@ pub enum BackendError {
 
 pub fn summarize_delete_errors(id: Uuid, errors: Vec<BackendError>) -> BackendError {
     BackendError::SummarizedRecordingDeleteFailed {
-        id: id,
+        id,
         parts: errors
             .into_iter()
             .filter_map(|e| {

@@ -366,7 +366,7 @@ pub fn make_delete_route<'a, O: Clone + Send + Sync + 'a>(
                 .db
                 .delete(&id)
                 .await
-                .map_err(|e| summarize_delete_errors(id.clone(), e))
+                .map_err(|e| summarize_delete_errors(id, e))
                 .map_err(error_handler)?;
 
             Ok(StatusCode::NO_CONTENT)
@@ -518,13 +518,21 @@ pub fn make_lookup_key_route<'a, O: Clone + Send + Sync + 'a>(
                 .map_err(error_handler)?;
             debug!(environment.logger, "Looking up key..."; "key" => format!("{}", key));
 
-            let option = environment.db.lookup_key(&key).await.map_err(error_handler)?;
+            let option = environment
+                .db
+                .lookup_key(&key)
+                .await
+                .map_err(error_handler)?;
 
             match option {
-                Some(id) => Ok(with_status(json(&SuccessResponse::Lookup { id }), StatusCode::OK)),
-                _ => Ok(with_status(json(&()), StatusCode::NOT_FOUND))
+                Some(id) => Ok(with_status(
+                    json(&SuccessResponse::Lookup { id }),
+                    StatusCode::OK,
+                )),
+                _ => Ok(with_status(json(&()), StatusCode::NOT_FOUND)),
             }
-        }.boxed()
+        }
+        .boxed()
     };
 
     warp::path(recordings_path)
@@ -649,10 +657,7 @@ async fn complete_upload<'a, O: Clone + Send + Sync + 'a>(
     .await
     .map_err(&error_handler)?;
 
-    let key = db
-        .create_key(&id, email)
-        .await
-        .map_err(&error_handler)?;
+    let key = db.create_key(&id, email).await.map_err(&error_handler)?;
 
     let id_as_str = format!("{}", id);
 
