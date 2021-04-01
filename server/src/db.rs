@@ -13,7 +13,11 @@ pub trait Db {
 
     fn count_all(&self) -> BoxFuture<Result<i64, BackendError>>;
 
-    fn create_management_token(&self, id: &Uuid, email: Option<String>) -> BoxFuture<Result<Uuid, BackendError>>;
+    fn create_management_token(
+        &self,
+        id: &Uuid,
+        email: Option<String>,
+    ) -> BoxFuture<Result<Uuid, BackendError>>;
 
     fn create_token(&self, parent_id: &Uuid) -> BoxFuture<Result<Uuid, BackendError>>;
 
@@ -30,6 +34,9 @@ pub trait Db {
     fn retrieve(&self, id: &Uuid) -> BoxFuture<Result<Option<Recording>, BackendError>>;
 
     fn retrieve_ages(&self) -> BoxFuture<Result<Vec<Label>, BackendError>>;
+
+    fn retrieve_by_token(&self, token: &Uuid)
+        -> BoxFuture<Result<Option<Recording>, BackendError>>;
 
     fn retrieve_categories(&self) -> BoxFuture<Result<Vec<Label>, BackendError>>;
 
@@ -129,7 +136,11 @@ mod postgres {
             .boxed()
         }
 
-        fn create_management_token(&self, id: &Uuid, email: Option<String>) -> BoxFuture<Result<Uuid, BackendError>> {
+        fn create_management_token(
+            &self,
+            id: &Uuid,
+            email: Option<String>,
+        ) -> BoxFuture<Result<Uuid, BackendError>> {
             let id = *id;
 
             async move {
@@ -143,7 +154,8 @@ mod postgres {
                     .map_err(map_sqlx_error)?;
 
                 Ok(token)
-            }.boxed()
+            }
+            .boxed()
         }
 
         fn create_token(&self, parent: &Uuid) -> BoxFuture<Result<Uuid, BackendError>> {
@@ -274,25 +286,7 @@ mod postgres {
 
                 let recording: Option<Recording> = query
                     .bind(id)
-                    .try_map(|row: PgRow| {
-                        let id: Uuid = try_get(&row, "id")?;
-                        let created_at: OffsetDateTime = try_get(&row, "created_at")?;
-                        let updated_at: OffsetDateTime = try_get(&row, "updated_at")?;
-                        let deleted_at: Option<OffsetDateTime> = try_get(&row, "deleted_at")?;
-                        let parent_id: Option<Uuid> = try_get(&row, "parent_id")?;
-
-                        let times = Times {
-                            created_at,
-                            updated_at,
-                        };
-
-                        Ok(match deleted_at {
-                            Some(deleted_at) => {
-                                new_deleted_recording(id, times, deleted_at, parent_id)
-                            }
-                            None => new_active_recording(id, times, parent_id, &row)?,
-                        })
-                    })
+                    .try_map(deserialize_recording)
                     .fetch_optional(&self.pool)
                     .await
                     .map_err(map_sqlx_error)?;
@@ -319,6 +313,27 @@ mod postgres {
                     .map_err(map_sqlx_error)?;
 
                 Ok(ages)
+            }
+            .boxed()
+        }
+
+        fn retrieve_by_token(
+            &self,
+            token: &Uuid,
+        ) -> BoxFuture<Result<Option<Recording>, BackendError>> {
+            let token = *token;
+
+            async move {
+                let query = sqlx::query(include_str!("queries/retrieve_by_token.sql"));
+
+                let recording: Option<Recording> = query
+                    .bind(token)
+                    .try_map(deserialize_recording)
+                    .fetch_optional(&self.pool)
+                    .await
+                    .map_err(map_sqlx_error)?;
+
+                Ok(recording)
             }
             .boxed()
         }
@@ -539,6 +554,24 @@ mod postgres {
         Ok(Recording::Active(ActiveRecording::new(
             id, times, name, parent_id, url, mime_type, category, gender, age, location, occupation,
         )))
+    }
+
+    fn deserialize_recording(row: PgRow) -> Result<Recording, sqlx::Error> {
+        let id: Uuid = try_get(&row, "id")?;
+        let created_at: OffsetDateTime = try_get(&row, "created_at")?;
+        let updated_at: OffsetDateTime = try_get(&row, "updated_at")?;
+        let deleted_at: Option<OffsetDateTime> = try_get(&row, "deleted_at")?;
+        let parent_id: Option<Uuid> = try_get(&row, "parent_id")?;
+
+        let times = Times {
+            created_at,
+            updated_at,
+        };
+
+        Ok(match deleted_at {
+            Some(deleted_at) => new_deleted_recording(id, times, deleted_at, parent_id),
+            None => new_active_recording(id, times, parent_id, &row)?,
+        })
     }
 
     fn new_deleted_recording(

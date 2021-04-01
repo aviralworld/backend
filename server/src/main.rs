@@ -18,14 +18,11 @@ use log::{info, initialize_logger};
 async fn main() -> Result<(), Box<dyn Error>> {
     dotenv::dotenv().ok();
 
+    let logger = initialize_logger();
+
     let store = Arc::new(S3Store::from_env().expect("initialize S3 store from environment"));
 
     fs::create_dir_all(env::temp_dir()).expect("ensure temporary directory exists");
-
-    let logger = initialize_logger();
-
-    #[cfg(feature = "enable_warp_logging")]
-    pretty_env_logger::init();
 
     let main_port: u16 = get_variable("BACKEND_PORT")
         .parse()
@@ -68,6 +65,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let children_route = routes::make_children_route(environment.clone());
     let delete_route = routes::make_delete_route(environment.clone());
     let retrieve_route = routes::make_retrieve_route(environment.clone());
+    let retrieve_by_token_route = routes::make_retrieve_by_token_route(environment.clone());
     let random_route = routes::make_random_route(environment.clone());
     let token_route = routes::make_token_route(environment.clone());
 
@@ -81,6 +79,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .or(delete_route)
         .or(random_route)
         .or(retrieve_route)
+        .or(retrieve_by_token_route)
         .or(token_route)
         .recover(move |r| routes::format_rejection(logger.clone(), r));
 

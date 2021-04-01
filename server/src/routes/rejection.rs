@@ -43,6 +43,7 @@ pub enum Context {
     Genders,
     Random { count: i16 },
     Retrieve { id: String },
+    RetrieveByToken { token: String },
     Token { id: String },
     Upload { id: Option<String> },
 }
@@ -82,6 +83,10 @@ impl Context {
 
     pub fn retrieve(id: String) -> Context {
         Context::Retrieve { id }
+    }
+
+    pub fn retrieve_by_token(token: String) -> Context {
+        Context::RetrieveByToken { token }
     }
 
     pub fn token(id: String) -> Context {

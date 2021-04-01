@@ -492,6 +492,51 @@ pub fn make_token_route<'a, O: Clone + Send + Sync + 'a>(
         .and_then(handler)
 }
 
+pub fn make_retrieve_by_token_route<'a, O: Clone + Send + Sync + 'a>(
+    environment: Environment<O>,
+) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
+    let recordings_path = environment.urls.recordings_path.clone();
+
+    let handler = move |token: String| -> BoxFuture<Result<WithStatus<Json>, reject::Rejection>> {
+        let environment = environment.clone();
+
+        async move {
+            use crate::recording::Recording;
+
+            let error_handler = |e: BackendError| {
+                rejection::Rejection::new(rejection::Context::retrieve_by_token(token.clone()), e)
+            };
+
+            let token = Uuid::parse_str(&token)
+                .map_err(|_| BackendError::InvalidId(token.clone()))
+                .map_err(error_handler)?;
+            debug!(environment.logger, "Retrieving recording by management token..."; "token" => format!("{}", &token));
+
+            let option = environment.db.retrieve_by_token(&token).await.map_err(error_handler)?;
+
+            match option {
+                Some(recording) => {
+                    let status = match recording {
+                        Recording::Active(_) => StatusCode::OK,
+                        Recording::Deleted(_) => StatusCode::GONE,
+                    };
+
+                    Ok(with_status(json(&recording), status))
+                }
+                None => Ok(with_status(json(&()), StatusCode::NOT_FOUND)),
+            }
+        }
+        .boxed()
+    };
+
+    warp::path(recordings_path)
+        .and(warp::path("translate"))
+        .and(warp::path::param::<String>())
+        .and(warp::path::end())
+        .and(warp::get())
+        .and_then(handler)
+}
+
 pub fn make_healthz_route<'a, O: Clone + Send + Sync + 'a>(
     _environment: Environment<O>,
 ) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
@@ -606,7 +651,10 @@ async fn complete_upload<'a, O: Clone + Send + Sync + 'a>(
     .await
     .map_err(&error_handler)?;
 
-    let management_token = db.create_management_token(&id, email).await.map_err(&error_handler)?;
+    let management_token = db
+        .create_management_token(&id, email)
+        .await
+        .map_err(&error_handler)?;
 
     let id_as_str = format!("{}", id);
 

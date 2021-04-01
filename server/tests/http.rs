@@ -110,8 +110,10 @@ async fn test_api() {
     let base_path = Path::new(&cargo_dir);
     let file_path = base_path.join("tests").join("opus_file.ogg");
 
-    let (id, tokens) = test_upload(&file_path, &content_type).await;
+    let (id, tokens, management_token) = test_upload(&file_path, &content_type).await;
     test_duplicate_upload(&file_path, &content_type).await;
+
+    test_management_token(&id, management_token).await;
 
     let children: serde_json::Value = serde_json::from_reader(
         fs::File::open("tests/simple_metadata_children.json")
@@ -145,13 +147,32 @@ async fn start_server() -> (Child, Vec<String>) {
 
     use tokio::process::Command;
 
-    let mut child = Command::new("cargo")
-        .args(&["run", "--frozen", "--offline"])
-        .env(
+    #[allow(unused_mut)]
+    let mut args = vec!["run", "--frozen", "--offline"];
+    #[allow(unused_mut)]
+    let mut envs = vec![
+        (
             "BACKEND_TOKENS_PER_RECORDING",
             TOKENS_PER_RECORDING.to_string(),
-        )
-        .env("BACKEND_RECORDINGS_PATH", RECORDINGS_PATH.to_string())
+        ),
+        ("BACKEND_RECORDINGS_PATH", RECORDINGS_PATH.to_string()),
+    ];
+
+    #[allow(unused_variables)]
+    if let Ok(x) = env::var("RUST_LOG") {
+        #[cfg(not(feature = "env_logging"))]
+        panic!("must run tests with `env_logging` feature to activate logging");
+
+        #[cfg(feature = "env_logging")]
+        {
+            args.extend_from_slice(&["--features", "env_logging"]);
+            envs.push(("RUST_LOG", x));
+        }
+    }
+
+    let mut child = Command::new("cargo")
+        .args(args)
+        .envs(envs)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true)
@@ -355,7 +376,7 @@ async fn test_genders() {
 async fn test_upload(
     file_path: impl AsRef<Path>,
     content_type: impl AsRef<str>,
-) -> (String, Vec<String>) {
+) -> (String, Vec<String>, String) {
     let bytes = fs::read("tests/simple_metadata.json").expect("read simple_metadata.json");
 
     let response = upload_file(
@@ -403,7 +424,11 @@ async fn test_upload(
         "response must provide the correct number of tokens"
     );
 
-    (id, tokens)
+    let management_token = response
+        .management_token
+        .expect("get management token from response");
+
+    (id, tokens, management_token)
 }
 
 async fn test_duplicate_upload(file_path: impl AsRef<Path>, content_type: impl AsRef<str>) {
@@ -463,6 +488,19 @@ async fn test_duplicate_upload(file_path: impl AsRef<Path>, content_type: impl A
             "error response must mention name already exists in database"
         );
     }
+}
+
+async fn test_management_token(id: &str, token: String) {
+    let url = url_to(Some(format!("translate/{}/", token)));
+    let response = reqwest::get(url.clone())
+        .await
+        .expect(&format!("get {}", url.as_str()));
+
+    let recording: RetrievalResponse =
+        serde_json::from_slice(&response.bytes().await.expect("get response body as string"))
+            .expect("deserialize retrieved recording");
+
+    assert_eq!(recording.id, id);
 }
 
 async fn test_uploading_children(
