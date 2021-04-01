@@ -12,7 +12,7 @@ use warp::reply::{json, with_header, with_status, Json, Reply, WithHeader, WithS
 use warp::Filter;
 
 use crate::environment::Environment;
-use crate::errors::BackendError;
+use crate::errors::{summarize_delete_errors, BackendError};
 use crate::io::parse_upload;
 use crate::recording::{ChildRecording, PartialRecording, UploadMetadata};
 use crate::{audio::format::AudioFormat, db::Db, environment, mime_type::MimeType};
@@ -359,7 +359,12 @@ pub fn make_delete_route<'a, O: Clone + Send + Sync + 'a>(
             debug!(environment.logger, "Deleting recording..."; "id" => format!("{}", &id));
 
             environment.store.delete(&id).await.map_err(error_handler)?;
-            environment.db.delete(&id).await.map_err(error_handler)?;
+            environment
+                .db
+                .delete(&id)
+                .await
+                .map_err(|e| summarize_delete_errors(id.clone(), e))
+                .map_err(error_handler)?;
 
             Ok(StatusCode::NO_CONTENT)
         }

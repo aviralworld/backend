@@ -52,7 +52,7 @@ pub enum BackendError {
 
     /// Represents an error returned by the remote server when deleting.
     #[error("failed to delete object from storage")]
-    DeleteFailed {
+    StoreDeleteFailed {
         source: RusotoError<DeleteObjectError>,
     },
 
@@ -104,4 +104,45 @@ pub enum BackendError {
     /// recording.
     #[error("token rollback failed for {token}")]
     TokenRollbackFailed { token: Uuid, source: sqlx::Error },
+
+    /// Represents an error caused by failing to delete part of a
+    /// recording.
+    #[error("failed to delete {id}/{part}: {source}")]
+    RecordingDeleteFailed {
+        id: Uuid,
+        part: String,
+        source: sqlx::Error,
+    },
+
+    /// Represents an error caused by failing to roll back the
+    /// deletion of part of a recording.
+    #[error("failed to roll back deletion of {id}/{part}: {source}")]
+    DeleteRollbackFailed {
+        id: Uuid,
+        part: String,
+        source: sqlx::Error,
+    },
+
+    /// Represents a combined error caused by failing to delete one or
+    /// more parts of a recording.
+    #[error("failed to delete parts of {id}: {0}", parts.join(", "))]
+    SummarizedRecordingDeleteFailed { id: Uuid, parts: Vec<String> },
+}
+
+pub fn summarize_delete_errors(id: Uuid, errors: Vec<BackendError>) -> BackendError {
+    BackendError::SummarizedRecordingDeleteFailed {
+        id: id,
+        parts: errors
+            .into_iter()
+            .filter_map(|e| {
+                if let BackendError::RecordingDeleteFailed { part, .. } = e {
+                    Some(part)
+                } else if let BackendError::DeleteRollbackFailed { part, .. } = e {
+                    Some(part)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>(),
+    }
 }

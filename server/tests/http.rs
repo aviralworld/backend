@@ -122,14 +122,16 @@ async fn test_api() {
     .expect("parse simple_metadata_children.json");
 
     let results = test_uploading_children(&file_path, &content_type, &id, tokens, children).await;
+    let (id_to_delete, recording_tokens_to_check, management_token_to_check) = &results[2];
 
-    let id_to_delete = results[2].0.to_owned();
     test_deletion(
-        &id_to_delete,
+        id_to_delete,
+        recording_tokens_to_check.to_vec(),
+        management_token_to_check.to_owned(),
         &id,
         &results
             .iter()
-            .map(|(id, _)| id.to_owned())
+            .map(|(id, _, _)| id.to_owned())
             .collect::<Vec<_>>(),
     )
     .await;
@@ -138,7 +140,7 @@ async fn test_api() {
 
     test_random().await;
 
-    let (id, tokens) = results[0].to_owned();
+    let (id, tokens, _) = results[0].to_owned();
     test_token(tokens[0].to_owned(), id).await;
 }
 
@@ -243,30 +245,20 @@ fn get_child_stderr(
 }
 
 async fn print_child_output(initial_output: Vec<String>, child: Child) {
-    use std::io::{stderr, stdout, Write};
-
     let output = child.wait_with_output().await.expect("get child output");
 
-    let stdout = stdout();
-    let mut stdout = stdout.lock();
-    write!(stdout, "Exit status: {:?}\n", output.status.code()).expect("write exit status");
+    println!("Exit status: {:?}", output.status.code());
 
-    write!(
-        stdout,
+    println!(
         "\nSTDOUT:\n{}",
         String::from_utf8(output.stdout).expect("decode stdout as UTF-8")
-    )
-    .expect("write stdout");
+    );
 
-    let stderr = stderr();
-    let mut stderr = stderr.lock();
-    write!(
-        stderr,
+    eprint!(
         "\nSTDERR:\n{}\n{}\n",
         initial_output.join("\n"),
         String::from_utf8(output.stderr).expect("decode stderr as UTF-8")
-    )
-    .expect("write stderr");
+    );
 }
 
 async fn test_formats() {
@@ -509,7 +501,7 @@ async fn test_uploading_children(
     parent: &str,
     mut tokens: Vec<String>,
     mut children: serde_json::Value,
-) -> Vec<(String, Vec<String>)> {
+) -> Vec<(String, Vec<String>, String)> {
     let mut results = vec![];
 
     for mut child in children
@@ -524,8 +516,8 @@ async fn test_uploading_children(
         )
         .await;
 
-        if let Some((id, tokens)) = result {
-            results.push((id, tokens));
+        if let Some(x) = result {
+            results.push(x);
         }
     }
 
@@ -540,7 +532,10 @@ async fn test_uploading_children(
         let returned_ids =
             parse_children_ids(&response.bytes().await.expect("get response body as bytes"));
         assert_eq!(
-            results.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>(),
+            results
+                .iter()
+                .map(|(id, _, _)| id.clone())
+                .collect::<Vec<_>>(),
             returned_ids
         );
     }
@@ -553,7 +548,7 @@ async fn test_uploading_child(
     content_type: impl AsRef<str>,
     token: String,
     child: &mut serde_json::Value,
-) -> Option<(String, Vec<String>)> {
+) -> Option<(String, Vec<String>, String)> {
     let object = child.as_object_mut().expect("get child as object");
     object.insert("token".to_owned(), serde_json::json!(token));
     let bytes = serde_json::to_vec(&object).expect("serialize edited child as JSON");
@@ -575,11 +570,18 @@ async fn test_uploading_child(
 
     let id = response.id.unwrap();
     let tokens = response.tokens.unwrap();
+    let management_token = response.management_token.unwrap();
 
-    Some((id, tokens))
+    Some((id, tokens, management_token))
 }
 
-async fn test_deletion(id_to_delete: &str, parent: &str, ids: &[String]) {
+async fn test_deletion(
+    id_to_delete: &str,
+    recording_tokens_to_check: Vec<String>,
+    management_token_to_check: String,
+    parent: &str,
+    ids: &[String],
+) {
     let path = format!("id/{id}/", id = id_to_delete);
     let response = reqwest::get(url_to(Some(path.clone())))
         .await
@@ -627,6 +629,14 @@ async fn test_deletion(id_to_delete: &str, parent: &str, ids: &[String]) {
         .expect(&format!("get /{}", path));
     assert_eq!(response.status(), StatusCode::GONE);
 
+    for token in recording_tokens_to_check {
+        let path = format!("token/{token}/", token = token);
+        let response = reqwest::get(url_to(Some(path.clone())))
+            .await
+            .expect(&format!("get /{}", path));
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
     let response = reqwest::get(recording_url)
         .await
         .expect("make request for deleted recording to store");
@@ -647,6 +657,16 @@ async fn test_deletion(id_to_delete: &str, parent: &str, ids: &[String]) {
             .collect::<Vec<_>>(),
         returned_ids
     );
+
+    {
+        let response = reqwest::get(url_to(Some(format!(
+            "translate/{}/",
+            management_token_to_check
+        ))))
+        .await
+        .expect("make request through management token");
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
 }
 
 async fn test_count() {

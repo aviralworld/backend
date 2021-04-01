@@ -21,7 +21,8 @@ pub trait Db {
 
     fn create_token(&self, parent_id: &Uuid) -> BoxFuture<Result<Uuid, BackendError>>;
 
-    fn delete(&self, id: &Uuid) -> BoxFuture<Result<(), BackendError>>;
+    // this may return multiple backend errors depending on which parts fail
+    fn delete(&self, id: &Uuid) -> BoxFuture<Result<(), Vec<BackendError>>>;
 
     fn lock_token(&self, token: &Uuid) -> BoxFuture<Result<Option<Uuid>, BackendError>>;
 
@@ -175,23 +176,92 @@ mod postgres {
             .boxed()
         }
 
-        fn delete(&self, id: &Uuid) -> BoxFuture<Result<(), BackendError>> {
+        fn delete(&self, id: &Uuid) -> BoxFuture<Result<(), Vec<BackendError>>> {
             let id = *id;
 
             async move {
+                let transaction = self
+                    .pool
+                    .begin()
+                    .await
+                    .map_err(map_sqlx_error)
+                    .map_err(|e| vec![e])?;
                 let query = sqlx::query(include_str!("queries/delete.sql"));
 
-                let count = query
-                    .bind(id)
-                    .execute(&self.pool)
-                    .await
-                    .map_err(map_sqlx_error)?
-                    .rows_affected();
+                let count_result = query.bind(id).execute(&self.pool).await;
+
+                if let Err(source) = count_result {
+                    let mut errors = vec![BackendError::RecordingDeleteFailed {
+                        id,
+                        part: "recording".to_owned(),
+                        source,
+                    }];
+
+                    let result = transaction.rollback().await;
+
+                    if let Err(source) = result {
+                        errors.push(BackendError::DeleteRollbackFailed {
+                            id,
+                            part: "recording".to_owned(),
+                            source,
+                        });
+                    }
+
+                    return Err(errors);
+                }
+
+                let c = count_result.unwrap();
+                let count = c.rows_affected();
 
                 if count == 0 {
-                    Err(BackendError::NonExistentId(id))
+                    transaction
+                        .rollback()
+                        .await
+                        .map_err(map_sqlx_error)
+                        .map_err(|e| vec![e])?;
+                    Err(vec![BackendError::NonExistentId(id)])
                 } else {
-                    Ok(())
+                    let mut errors = vec![];
+                    // TODO return a composite result with all of these
+                    if let Err(source) =
+                        sqlx::query(include_str!("queries/delete_management_token.sql"))
+                            .bind(id)
+                            .execute(&self.pool)
+                            .await
+                    {
+                        errors.push(BackendError::RecordingDeleteFailed {
+                            id,
+                            part: "management token".to_string(),
+                            source,
+                        });
+                    }
+
+                    if let Err(source) =
+                        sqlx::query(include_str!("queries/delete_recording_tokens.sql"))
+                            .bind(id)
+                            .execute(&self.pool)
+                            .await
+                    {
+                        errors.push(BackendError::RecordingDeleteFailed {
+                            id,
+                            part: "recording tokens".to_string(),
+                            source,
+                        });
+                    }
+
+                    if let Err(source) = transaction.commit().await {
+                        errors.push(BackendError::RecordingDeleteFailed {
+                            id,
+                            part: "commit".to_string(),
+                            source,
+                        });
+                    }
+
+                    if errors.len() > 0 {
+                        Err(errors)
+                    } else {
+                        Ok(())
+                    }
                 }
             }
             .boxed()
