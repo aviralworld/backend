@@ -48,7 +48,7 @@ tokio-stream = { version = "0.1.5", features = ["io-util"] }
 
 [features]
 default = ["which"]
-enable_warp_logging = ["pretty_env_logger"]
+env_logger = ["pretty_env_logger"]
 helpers = ["structopt"]
 use_ffmpeg_sys = ["ffmpeg-next"]
 
