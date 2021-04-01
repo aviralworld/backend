@@ -17,6 +17,7 @@ struct CreationResponse {
     message: Option<String>,
     id: Option<String>,
     tokens: Option<Vec<String>>,
+    management_token: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

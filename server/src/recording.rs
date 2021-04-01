@@ -198,6 +198,11 @@ pub struct UploadMetadata {
     /// The token using which this recording was created.
     pub(crate) token: Uuid,
 
+    /// The email address of the author.
+    #[serde(default)]
+    #[serde(deserialize_with = "normalization::deserialize_option")]
+    pub(crate) email: Option<String>,
+
     /// The ID of the category it falls into.
     pub(crate) category_id: Id,
 }

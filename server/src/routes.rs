@@ -41,7 +41,9 @@ enum SuccessResponse<'a> {
     },
     Upload {
         id: String,
+        // TODO these should not be options
         tokens: Option<Vec<Uuid>>,
+        management_token: Option<Uuid>,
     },
 }
 
@@ -267,6 +269,7 @@ pub fn make_upload_route<'a, O: Clone + Send + Sync + 'a>(
 
                 // TODO retry in case ID already exists
                 debug!(logger, "Writing metadata to database...");
+                let email = metadata.email.clone(); // save for later
                 let id = save_recording_metadata(logger.clone(), db.clone(), &parent_id, metadata)
                     .await
                     .map_err(&error_handler)?;
@@ -286,7 +289,7 @@ pub fn make_upload_route<'a, O: Clone + Send + Sync + 'a>(
                     .map_err(&error_handler)?;
 
                 match mime_type {
-                    Some(mime_type) => complete_upload(environment.clone(), id, token, mime_type, verified_audio, error_handler).await,
+                    Some(mime_type) => complete_upload(environment.clone(), id, token, email, mime_type, verified_audio, error_handler).await,
                     // why does this work but not directly returning `Err(error_handler(BackendError::...))`?
                     None => Err(BackendError::InvalidAudioFormat {
                         format: audio_format,
@@ -571,6 +574,7 @@ async fn complete_upload<'a, O: Clone + Send + Sync + 'a>(
     environment: Environment<O>,
     id: Uuid,
     token: Uuid,
+    email: Option<String>,
     mime_type: MimeType,
     verified_audio: Vec<u8>,
     error_handler: impl Fn(BackendError) -> rejection::Rejection,
@@ -602,12 +606,15 @@ async fn complete_upload<'a, O: Clone + Send + Sync + 'a>(
     .await
     .map_err(&error_handler)?;
 
+    let management_token = db.create_management_token(&id, email).await.map_err(&error_handler)?;
+
     let id_as_str = format!("{}", id);
 
     debug!(logger, "Sending response...");
     let response = SuccessResponse::Upload {
         id: id_as_str,
         tokens: Some(tokens),
+        management_token: Some(management_token),
     };
 
     Ok(with_header(

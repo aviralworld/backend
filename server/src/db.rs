@@ -13,6 +13,8 @@ pub trait Db {
 
     fn count_all(&self) -> BoxFuture<Result<i64, BackendError>>;
 
+    fn create_management_token(&self, id: &Uuid, email: Option<String>) -> BoxFuture<Result<Uuid, BackendError>>;
+
     fn create_token(&self, parent_id: &Uuid) -> BoxFuture<Result<Uuid, BackendError>>;
 
     fn delete(&self, id: &Uuid) -> BoxFuture<Result<(), BackendError>>;
@@ -125,6 +127,23 @@ mod postgres {
                 Ok(count)
             }
             .boxed()
+        }
+
+        fn create_management_token(&self, id: &Uuid, email: Option<String>) -> BoxFuture<Result<Uuid, BackendError>> {
+            let id = *id;
+
+            async move {
+                let query = sqlx::query_as(include_str!("queries/create_management_token.sql"));
+
+                let (token,): (Uuid,) = query
+                    .bind(id)
+                    .bind(email)
+                    .fetch_one(&self.pool)
+                    .await
+                    .map_err(map_sqlx_error)?;
+
+                Ok(token)
+            }.boxed()
         }
 
         fn create_token(&self, parent: &Uuid) -> BoxFuture<Result<Uuid, BackendError>> {
