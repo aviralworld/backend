@@ -2,7 +2,7 @@ variables:
   CARGO_INCREMENTAL: 0
   FFMPEG_VERSION: 4.3.1
   POSTGRES_VERSION: 12
-  RUST_VERSION: 1.49.0
+  RUST_VERSION: 1.51.0
   KANIKO_AUTH_CONFIG: >-
       {
         "auths": {

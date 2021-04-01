@@ -13,11 +13,17 @@ pub trait Db {
 
     fn count_all(&self) -> BoxFuture<Result<i64, BackendError>>;
 
+    fn create_key(&self, id: &Uuid, email: Option<String>)
+        -> BoxFuture<Result<Uuid, BackendError>>;
+
     fn create_token(&self, parent_id: &Uuid) -> BoxFuture<Result<Uuid, BackendError>>;
 
-    fn delete(&self, id: &Uuid) -> BoxFuture<Result<(), BackendError>>;
+    // this may return multiple backend errors depending on which parts fail
+    fn delete(&self, id: &Uuid) -> BoxFuture<Result<(), Vec<BackendError>>>;
 
     fn lock_token(&self, token: &Uuid) -> BoxFuture<Result<Option<Uuid>, BackendError>>;
+
+    fn lookup_key(&self, key: &Uuid) -> BoxFuture<Result<Option<Uuid>, BackendError>>;
 
     fn insert(
         &self,
@@ -127,6 +133,28 @@ mod postgres {
             .boxed()
         }
 
+        fn create_key(
+            &self,
+            id: &Uuid,
+            email: Option<String>,
+        ) -> BoxFuture<Result<Uuid, BackendError>> {
+            let id = *id;
+
+            async move {
+                let query = sqlx::query_as(include_str!("queries/create_key.sql"));
+
+                let (token,): (Uuid,) = query
+                    .bind(id)
+                    .bind(email)
+                    .fetch_one(&self.pool)
+                    .await
+                    .map_err(map_sqlx_error)?;
+
+                Ok(token)
+            }
+            .boxed()
+        }
+
         fn create_token(&self, parent: &Uuid) -> BoxFuture<Result<Uuid, BackendError>> {
             let parent_id = *parent;
 
@@ -144,23 +172,91 @@ mod postgres {
             .boxed()
         }
 
-        fn delete(&self, id: &Uuid) -> BoxFuture<Result<(), BackendError>> {
+        fn delete(&self, id: &Uuid) -> BoxFuture<Result<(), Vec<BackendError>>> {
             let id = *id;
 
             async move {
+                let transaction = self
+                    .pool
+                    .begin()
+                    .await
+                    .map_err(map_sqlx_error)
+                    .map_err(|e| vec![e])?;
                 let query = sqlx::query(include_str!("queries/delete.sql"));
 
-                let count = query
-                    .bind(id)
-                    .execute(&self.pool)
-                    .await
-                    .map_err(map_sqlx_error)?
-                    .rows_affected();
+                let count_result = query.bind(id).execute(&self.pool).await;
+
+                if let Err(source) = count_result {
+                    let mut errors = vec![BackendError::RecordingDeleteFailed {
+                        id,
+                        part: "recording".to_owned(),
+                        source,
+                    }];
+
+                    let result = transaction.rollback().await;
+
+                    if let Err(source) = result {
+                        errors.push(BackendError::DeleteRollbackFailed {
+                            id,
+                            part: "recording".to_owned(),
+                            source,
+                        });
+                    }
+
+                    return Err(errors);
+                }
+
+                let c = count_result.unwrap();
+                let count = c.rows_affected();
 
                 if count == 0 {
-                    Err(BackendError::NonExistentId(id))
+                    transaction
+                        .rollback()
+                        .await
+                        .map_err(map_sqlx_error)
+                        .map_err(|e| vec![e])?;
+                    Err(vec![BackendError::NonExistentId(id)])
                 } else {
-                    Ok(())
+                    let mut errors = vec![];
+                    // TODO return a composite result with all of these
+                    if let Err(source) = sqlx::query(include_str!("queries/delete_key.sql"))
+                        .bind(id)
+                        .execute(&self.pool)
+                        .await
+                    {
+                        errors.push(BackendError::RecordingDeleteFailed {
+                            id,
+                            part: "management token".to_string(),
+                            source,
+                        });
+                    }
+
+                    if let Err(source) =
+                        sqlx::query(include_str!("queries/delete_recording_tokens.sql"))
+                            .bind(id)
+                            .execute(&self.pool)
+                            .await
+                    {
+                        errors.push(BackendError::RecordingDeleteFailed {
+                            id,
+                            part: "recording tokens".to_string(),
+                            source,
+                        });
+                    }
+
+                    if let Err(source) = transaction.commit().await {
+                        errors.push(BackendError::RecordingDeleteFailed {
+                            id,
+                            part: "commit".to_string(),
+                            source,
+                        });
+                    }
+
+                    if !errors.is_empty() {
+                        Err(errors)
+                    } else {
+                        Ok(())
+                    }
                 }
             }
             .boxed()
@@ -206,9 +302,27 @@ mod postgres {
                     .fetch_optional(&self.pool)
                     .await
                     .map_err(map_sqlx_error)?
-                    .map(|(parent_id,)| parent_id);
+                    .map(|(x,)| x);
 
                 Ok(parent_id)
+            }
+            .boxed()
+        }
+
+        fn lookup_key(&self, key: &Uuid) -> BoxFuture<Result<Option<Uuid>, BackendError>> {
+            let key = *key;
+
+            async move {
+                let query = sqlx::query_as(include_str!("queries/lookup_key.sql"));
+
+                let id: Option<Uuid> = query
+                    .bind(key)
+                    .fetch_optional(&self.pool)
+                    .await
+                    .map_err(map_sqlx_error)?
+                    .map(|(x,)| x);
+
+                Ok(id)
             }
             .boxed()
         }
@@ -255,25 +369,7 @@ mod postgres {
 
                 let recording: Option<Recording> = query
                     .bind(id)
-                    .try_map(|row: PgRow| {
-                        let id: Uuid = try_get(&row, "id")?;
-                        let created_at: OffsetDateTime = try_get(&row, "created_at")?;
-                        let updated_at: OffsetDateTime = try_get(&row, "updated_at")?;
-                        let deleted_at: Option<OffsetDateTime> = try_get(&row, "deleted_at")?;
-                        let parent_id: Option<Uuid> = try_get(&row, "parent_id")?;
-
-                        let times = Times {
-                            created_at,
-                            updated_at,
-                        };
-
-                        Ok(match deleted_at {
-                            Some(deleted_at) => {
-                                new_deleted_recording(id, times, deleted_at, parent_id)?
-                            }
-                            None => new_active_recording(id, times, parent_id, &row)?,
-                        })
-                    })
+                    .try_map(deserialize_recording)
                     .fetch_optional(&self.pool)
                     .await
                     .map_err(map_sqlx_error)?;
@@ -325,6 +421,7 @@ mod postgres {
             .boxed()
         }
 
+        #[allow(clippy::needless_question_mark)]
         fn retrieve_format_essences(&self) -> BoxFuture<Result<Vec<String>, BackendError>> {
             async move {
                 let query = sqlx::query(include_str!("queries/retrieve_format_essences.sql"));
@@ -521,17 +618,33 @@ mod postgres {
         )))
     }
 
+    fn deserialize_recording(row: PgRow) -> Result<Recording, sqlx::Error> {
+        let id: Uuid = try_get(&row, "id")?;
+        let created_at: OffsetDateTime = try_get(&row, "created_at")?;
+        let updated_at: OffsetDateTime = try_get(&row, "updated_at")?;
+        let deleted_at: Option<OffsetDateTime> = try_get(&row, "deleted_at")?;
+        let parent_id: Option<Uuid> = try_get(&row, "parent_id")?;
+
+        let times = Times {
+            created_at,
+            updated_at,
+        };
+
+        Ok(match deleted_at {
+            Some(deleted_at) => new_deleted_recording(id, times, deleted_at, parent_id),
+            None => new_active_recording(id, times, parent_id, &row)?,
+        })
+    }
+
     fn new_deleted_recording(
         id: Uuid,
         times: Times,
         deleted_at: OffsetDateTime,
         parent_id: Option<Uuid>,
-    ) -> Result<Recording, sqlx::Error> {
+    ) -> Recording {
         use crate::recording::DeletedRecording;
 
-        Ok(Recording::Deleted(DeletedRecording::new(
-            id, times, deleted_at, parent_id,
-        )))
+        Recording::Deleted(DeletedRecording::new(id, times, deleted_at, parent_id))
     }
 
     fn try_get<'a, T: sqlx::Type<sqlx::Postgres> + sqlx::decode::Decode<'a, sqlx::Postgres>>(

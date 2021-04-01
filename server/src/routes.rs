@@ -12,7 +12,7 @@ use warp::reply::{json, with_header, with_status, Json, Reply, WithHeader, WithS
 use warp::Filter;
 
 use crate::environment::Environment;
-use crate::errors::BackendError;
+use crate::errors::{summarize_delete_errors, BackendError};
 use crate::io::parse_upload;
 use crate::recording::{ChildRecording, PartialRecording, UploadMetadata};
 use crate::{audio::format::AudioFormat, db::Db, environment, mime_type::MimeType};
@@ -32,6 +32,9 @@ enum SuccessResponse<'a> {
         timestamp: Option<&'a str>,
         version: &'a str,
     },
+    Lookup {
+        id: Uuid,
+    },
     Random {
         recordings: Vec<PartialRecording>,
     },
@@ -41,7 +44,9 @@ enum SuccessResponse<'a> {
     },
     Upload {
         id: String,
+        // TODO these should not be options
         tokens: Option<Vec<Uuid>>,
+        key: Option<Uuid>,
     },
 }
 
@@ -267,6 +272,7 @@ pub fn make_upload_route<'a, O: Clone + Send + Sync + 'a>(
 
                 // TODO retry in case ID already exists
                 debug!(logger, "Writing metadata to database...");
+                let email = metadata.email.clone(); // save for later
                 let id = save_recording_metadata(logger.clone(), db.clone(), &parent_id, metadata)
                     .await
                     .map_err(&error_handler)?;
@@ -286,7 +292,7 @@ pub fn make_upload_route<'a, O: Clone + Send + Sync + 'a>(
                     .map_err(&error_handler)?;
 
                 match mime_type {
-                    Some(mime_type) => complete_upload(environment.clone(), id, token, mime_type, verified_audio, error_handler).await,
+                    Some(mime_type) => complete_upload(environment.clone(), id, token, email, mime_type, verified_audio, error_handler).await,
                     // why does this work but not directly returning `Err(error_handler(BackendError::...))`?
                     None => Err(BackendError::InvalidAudioFormat {
                         format: audio_format,
@@ -356,7 +362,12 @@ pub fn make_delete_route<'a, O: Clone + Send + Sync + 'a>(
             debug!(environment.logger, "Deleting recording..."; "id" => format!("{}", &id));
 
             environment.store.delete(&id).await.map_err(error_handler)?;
-            environment.db.delete(&id).await.map_err(error_handler)?;
+            environment
+                .db
+                .delete(&id)
+                .await
+                .map_err(|e| summarize_delete_errors(id, e))
+                .map_err(error_handler)?;
 
             Ok(StatusCode::NO_CONTENT)
         }
@@ -489,6 +500,49 @@ pub fn make_token_route<'a, O: Clone + Send + Sync + 'a>(
         .and_then(handler)
 }
 
+pub fn make_lookup_key_route<'a, O: Clone + Send + Sync + 'a>(
+    environment: Environment<O>,
+) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
+    let recordings_path = environment.urls.recordings_path.clone();
+
+    let handler = move |key: String| -> BoxFuture<Result<WithStatus<Json>, reject::Rejection>> {
+        let environment = environment.clone();
+
+        async move {
+            let error_handler = |e: BackendError| {
+                rejection::Rejection::new(rejection::Context::lookup_key(key.clone()), e)
+            };
+
+            let key = Uuid::parse_str(&key)
+                .map_err(|_| BackendError::InvalidId(key.clone()))
+                .map_err(error_handler)?;
+            debug!(environment.logger, "Looking up key..."; "key" => format!("{}", key));
+
+            let option = environment
+                .db
+                .lookup_key(&key)
+                .await
+                .map_err(error_handler)?;
+
+            match option {
+                Some(id) => Ok(with_status(
+                    json(&SuccessResponse::Lookup { id }),
+                    StatusCode::OK,
+                )),
+                _ => Ok(with_status(json(&()), StatusCode::NOT_FOUND)),
+            }
+        }
+        .boxed()
+    };
+
+    warp::path(recordings_path)
+        .and(warp::path("lookup"))
+        .and(warp::path::param::<String>())
+        .and(warp::path::end())
+        .and(warp::get())
+        .and_then(handler)
+}
+
 pub fn make_healthz_route<'a, O: Clone + Send + Sync + 'a>(
     _environment: Environment<O>,
 ) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
@@ -571,6 +625,7 @@ async fn complete_upload<'a, O: Clone + Send + Sync + 'a>(
     environment: Environment<O>,
     id: Uuid,
     token: Uuid,
+    email: Option<String>,
     mime_type: MimeType,
     verified_audio: Vec<u8>,
     error_handler: impl Fn(BackendError) -> rejection::Rejection,
@@ -602,12 +657,15 @@ async fn complete_upload<'a, O: Clone + Send + Sync + 'a>(
     .await
     .map_err(&error_handler)?;
 
+    let key = db.create_key(&id, email).await.map_err(&error_handler)?;
+
     let id_as_str = format!("{}", id);
 
     debug!(logger, "Sending response...");
     let response = SuccessResponse::Upload {
         id: id_as_str,
         tokens: Some(tokens),
+        key: Some(key),
     };
 
     Ok(with_header(

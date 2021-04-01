@@ -41,6 +41,7 @@ pub enum Context {
     Delete { id: String },
     Formats,
     Genders,
+    LookupKey { token: String },
     Random { count: i16 },
     Retrieve { id: String },
     Token { id: String },
@@ -74,6 +75,10 @@ impl Context {
 
     pub fn genders() -> Context {
         Context::Genders
+    }
+
+    pub fn lookup_key(token: String) -> Context {
+        Context::LookupKey { token }
     }
 
     pub fn random(count: i16) -> Context {

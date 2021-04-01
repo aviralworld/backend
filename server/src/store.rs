@@ -120,7 +120,7 @@ async fn delete(store: &S3Store, key: Uuid) -> Result<(), BackendError> {
 
     result
         .map(|_| ())
-        .map_err(|source| BackendError::DeleteFailed { source })
+        .map_err(|source| BackendError::StoreDeleteFailed { source })
 }
 
 async fn upload(
