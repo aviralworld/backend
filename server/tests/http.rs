@@ -81,7 +81,7 @@ async fn api_works() {
     prepare_db().await;
 
     let show_output = get_variable("BACKEND_TESTING_SHOW_SERVER_OUTPUT") == "1";
-    let (mut child, initial_output) = start_server().await;
+    let (child, initial_output) = start_server().await;
 
     let result = async move {
         use futures::future::FutureExt;
@@ -92,7 +92,12 @@ async fn api_works() {
     }
     .await;
 
-    child.kill().await.expect("kill child process");
+    let admin_url = format!("http://127.0.0.1:{}", get_variable("BACKEND_ADMIN_PORT"));
+    let _ = reqwest::Client::new()
+        .post(format!("{}/terminate", admin_url))
+        .send()
+        .await
+        .expect("terminate server");
 
     if show_output {
         print_child_output(initial_output, child).await;
