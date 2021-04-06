@@ -23,7 +23,7 @@ pub trait Db {
 
     fn lock_token(&self, token: &Uuid) -> BoxFuture<Result<Option<Uuid>, BackendError>>;
 
-    fn lookup_key(&self, key: &Uuid) -> BoxFuture<Result<Option<Uuid>, BackendError>>;
+    fn lookup_key(&self, key: &Uuid) -> BoxFuture<Result<Option<(Uuid, Vec<Uuid>)>, BackendError>>;
 
     fn insert(
         &self,
@@ -309,20 +309,19 @@ mod postgres {
             .boxed()
         }
 
-        fn lookup_key(&self, key: &Uuid) -> BoxFuture<Result<Option<Uuid>, BackendError>> {
+        fn lookup_key(&self, key: &Uuid) -> BoxFuture<Result<Option<(Uuid, Vec<Uuid>)>, BackendError>> {
             let key = *key;
 
             async move {
                 let query = sqlx::query_as(include_str!("queries/lookup_key.sql"));
 
-                let id: Option<Uuid> = query
+                let found: Option<(Uuid, Vec<Uuid>)> = query
                     .bind(key)
                     .fetch_optional(&self.pool)
                     .await
-                    .map_err(map_sqlx_error)?
-                    .map(|(x,)| x);
+                    .map_err(map_sqlx_error)?;
 
-                Ok(id)
+                Ok(found)
             }
             .boxed()
         }

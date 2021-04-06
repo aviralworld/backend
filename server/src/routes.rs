@@ -497,8 +497,8 @@ pub fn make_lookup_key_route<'a, O: Clone + Send + Sync + 'a>(
                 .map_err(error_handler)?;
 
             match option {
-                Some(id) => Ok(with_status(
-                    json(&SuccessResponse::Lookup { id }),
+                Some((id, tokens)) => Ok(with_status(
+                    json(&SuccessResponse::Lookup { id, tokens }),
                     StatusCode::OK,
                 )),
                 _ => Ok(with_status(json(&()), StatusCode::NOT_FOUND)),

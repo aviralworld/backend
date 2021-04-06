@@ -54,6 +54,7 @@ struct TokenResponse {
 #[serde(deny_unknown_fields)]
 struct LookupResponse {
     id: String,
+    tokens: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -222,7 +223,6 @@ async fn wait_for_server(child: &mut Child) -> (bool, ChildOutput) {
     let initialization_future = lines
         .take_while(move |l| {
             let line = l.as_ref().expect("get line from stream").to_string();
-
             output_clone.write().unwrap().push(line.to_string());
 
             let result = serde_json::from_str::<serde_json::Value>(&line);
@@ -496,6 +496,8 @@ async fn test_key(id: &str, token: String) {
     let response = reqwest::get(url.clone())
         .await
         .expect(&format!("get {}", url.as_str()));
+
+    assert_eq!(response.status(), StatusCode::OK);
 
     let recording: LookupResponse =
         serde_json::from_slice(&response.bytes().await.expect("get response body as string"))
