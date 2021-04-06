@@ -87,7 +87,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             tokio::select! {
                 _ = should_terminate => {},
                 _ = signal => {
-                    terminate();
+                    terminate().await;
                 }
             }
         }
