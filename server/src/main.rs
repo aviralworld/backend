@@ -3,6 +3,8 @@ use std::error::Error;
 use std::fs;
 use std::sync::Arc;
 
+use futures::future::{BoxFuture, FutureExt};
+use tokio::sync::mpsc;
 use warp::Filter;
 
 use backend::audio;
@@ -12,9 +14,7 @@ use backend::environment::{Config, Environment};
 use backend::routes;
 use backend::store::S3Store;
 use backend::urls::Urls;
-use futures::future::FutureExt;
 use log::{info, initialize_logger, Logger};
-use tokio::sync::mpsc;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -100,21 +100,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
         should_terminate.clone(),
     );
 
-    let admin_server = {
-        let should_terminate = should_terminate.clone();
-        let terminate = terminate.clone();
-
-        let routes = routes::admin::make_healthz_route(environment.clone()).or(
-            routes::admin::make_termination_route(environment.clone(), terminate),
-        );
-
-        let (_, admin_server) =
-            warp::serve(routes).bind_with_graceful_shutdown(([0, 0, 0, 0], admin_port), async {
-                should_terminate.await;
-            });
-
-        admin_server
-    };
+    let admin_server = start_admin_server(
+        logger.clone(),
+        admin_port,
+        environment.clone(),
+        should_terminate.clone(),
+        terminate.clone(),
+    );
 
     tokio::join!(ctrlc, main_server, admin_server);
 
@@ -168,4 +160,28 @@ fn start_main_server<O: Clone + Send + Sync + 'static>(
         });
 
     main_server
+}
+
+fn start_admin_server<O: Clone + Send + Sync + 'static>(
+    _logger: Arc<Logger>,
+    port: u16,
+    environment: Environment<O>,
+    should_terminate: futures::future::Shared<
+        impl warp::Future<Output = ()> + Send + Sync + 'static,
+    >,
+    terminate: Arc<dyn Fn() -> BoxFuture<'static, ()> + Send + Sync + 'static>,
+) -> impl warp::Future<Output = ()> + 'static {
+    let should_terminate = should_terminate.clone();
+    let terminate = terminate.clone();
+
+    let routes = routes::admin::make_healthz_route(environment.clone()).or(
+        routes::admin::make_termination_route(environment.clone(), terminate),
+    );
+
+    let (_, admin_server) =
+        warp::serve(routes).bind_with_graceful_shutdown(([0, 0, 0, 0], port), async {
+            should_terminate.await;
+        });
+
+    admin_server
 }
