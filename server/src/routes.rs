@@ -13,7 +13,7 @@ use warp::Filter;
 use crate::environment::Environment;
 use crate::errors::{summarize_delete_errors, BackendError};
 use crate::io::parse_upload;
-use crate::recording::{UploadMetadata};
+use crate::recording::UploadMetadata;
 use crate::{audio::format::AudioFormat, db::Db, environment, mime_type::MimeType};
 
 pub mod admin;

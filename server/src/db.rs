@@ -309,7 +309,10 @@ mod postgres {
             .boxed()
         }
 
-        fn lookup_key(&self, key: &Uuid) -> BoxFuture<Result<Option<(Uuid, Vec<Uuid>)>, BackendError>> {
+        fn lookup_key(
+            &self,
+            key: &Uuid,
+        ) -> BoxFuture<Result<Option<(Uuid, Vec<Uuid>)>, BackendError>> {
             let key = *key;
 
             async move {

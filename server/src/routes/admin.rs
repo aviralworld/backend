@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
 use futures::future::{BoxFuture, FutureExt};
-use warp::Filter;
 use warp::http::StatusCode;
 use warp::reject;
 use warp::reply::{json, Reply};
+use warp::Filter;
 
 use super::response::SuccessResponse;
 use crate::environment::Environment;
@@ -23,8 +23,7 @@ pub fn make_healthz_route<'a, O: Clone + Send + Sync + 'a>(
 
 type TerminationFuture<'a> = BoxFuture<'a, ()>;
 
-type TerminationFunctionWrapper<'a> =
-    Arc<dyn Fn() -> TerminationFuture<'a> + Send + Sync + 'a>;
+type TerminationFunctionWrapper<'a> = Arc<dyn Fn() -> TerminationFuture<'a> + Send + Sync + 'a>;
 
 pub fn make_termination_route<'a, O: Clone + Send + Sync + 'a>(
     _environment: Environment<O>,
