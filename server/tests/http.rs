@@ -54,6 +54,7 @@ struct TokenResponse {
 #[serde(deny_unknown_fields)]
 struct LookupResponse {
     id: String,
+    tokens: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -81,7 +82,7 @@ async fn api_works() {
     prepare_db().await;
 
     let show_output = get_variable("BACKEND_TESTING_SHOW_SERVER_OUTPUT") == "1";
-    let (mut child, initial_output) = start_server().await;
+    let (child, initial_output) = start_server().await;
 
     let result = async move {
         use futures::future::FutureExt;
@@ -92,7 +93,12 @@ async fn api_works() {
     }
     .await;
 
-    child.kill().await.expect("kill child process");
+    let admin_url = format!("http://127.0.0.1:{}", get_variable("BACKEND_ADMIN_PORT"));
+    let _ = reqwest::Client::new()
+        .post(format!("{}/terminate", admin_url))
+        .send()
+        .await
+        .expect("terminate server");
 
     if show_output {
         print_child_output(initial_output, child).await;
@@ -217,7 +223,6 @@ async fn wait_for_server(child: &mut Child) -> (bool, ChildOutput) {
     let initialization_future = lines
         .take_while(move |l| {
             let line = l.as_ref().expect("get line from stream").to_string();
-
             output_clone.write().unwrap().push(line.to_string());
 
             let result = serde_json::from_str::<serde_json::Value>(&line);
@@ -491,6 +496,8 @@ async fn test_key(id: &str, token: String) {
     let response = reqwest::get(url.clone())
         .await
         .expect(&format!("get {}", url.as_str()));
+
+    assert_eq!(response.status(), StatusCode::OK);
 
     let recording: LookupResponse =
         serde_json::from_slice(&response.bytes().await.expect("get response body as string"))

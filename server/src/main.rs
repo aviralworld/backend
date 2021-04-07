@@ -3,6 +3,8 @@ use std::error::Error;
 use std::fs;
 use std::sync::Arc;
 
+use futures::future::{BoxFuture, FutureExt};
+use tokio::sync::mpsc;
 use warp::Filter;
 
 use backend::audio;
@@ -12,7 +14,7 @@ use backend::environment::{Config, Environment};
 use backend::routes;
 use backend::store::S3Store;
 use backend::urls::Urls;
-use log::{info, initialize_logger};
+use log::{info, initialize_logger, Logger};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -56,6 +58,73 @@ async fn main() -> Result<(), Box<dyn Error>> {
     );
     let environment = Environment::new(logger.clone(), db, urls, store, checker, config);
 
+    let (termination_sender, mut termination_receiver) = mpsc::channel::<()>(1);
+
+    let terminate = Arc::new(move || {
+        let termination_sender = termination_sender.clone();
+
+        async move {
+            let termination_sender = termination_sender.clone();
+            termination_sender.send(()).await.unwrap();
+        }
+        .boxed()
+    });
+
+    let should_terminate = async move {
+        termination_receiver.recv().await;
+    }
+    .shared();
+
+    let ctrlc = {
+        let should_terminate = should_terminate.clone();
+        let terminate = terminate.clone();
+
+        let signal = tokio::signal::ctrl_c();
+
+        async move {
+            let terminate = terminate.clone();
+
+            tokio::select! {
+                _ = should_terminate => {},
+                _ = signal => {
+                    terminate().await;
+                }
+            }
+        }
+    };
+
+    let main_server = start_main_server(
+        logger.clone(),
+        main_port,
+        environment.clone(),
+        should_terminate.clone(),
+    );
+
+    let admin_server = start_admin_server(
+        logger.clone(),
+        admin_port,
+        environment.clone(),
+        should_terminate.clone(),
+        terminate.clone(),
+    );
+
+    tokio::join!(ctrlc, main_server, admin_server);
+
+    info!(logger, "Exiting gracefully...");
+
+    Ok(())
+}
+
+fn start_main_server<O: Clone + Send + Sync + 'static>(
+    logger: Arc<Logger>,
+    port: u16,
+    environment: Environment<O>,
+    should_terminate: futures::future::Shared<
+        impl warp::Future<Output = ()> + Send + Sync + 'static,
+    >,
+) -> impl warp::Future<Output = ()> + 'static {
+    let logger2 = logger.clone();
+
     let formats_route = routes::make_formats_route(environment.clone());
     let ages_list_route = routes::make_ages_list_route(environment.clone());
     let categories_list_route = routes::make_categories_list_route(environment.clone());
@@ -67,7 +136,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let retrieve_route = routes::make_retrieve_route(environment.clone());
     let lookup_key_route = routes::make_lookup_key_route(environment.clone());
     let random_route = routes::make_random_route(environment.clone());
-    let token_route = routes::make_token_route(environment.clone());
+    let token_route = routes::make_token_route(environment);
 
     let routes = formats_route
         .or(ages_list_route)
@@ -81,15 +150,35 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .or(retrieve_route)
         .or(lookup_key_route)
         .or(token_route)
-        .recover(move |r| routes::format_rejection(logger.clone(), r));
+        .recover(move |r| routes::format_rejection(logger2.clone(), r));
 
-    let main_server = warp::serve(routes).run(([0, 0, 0, 0], main_port));
+    let (_, main_server) =
+        warp::serve(routes).bind_with_graceful_shutdown(([0, 0, 0, 0], port), async {
+            should_terminate.await;
+        });
 
-    let healthz_route = routes::make_healthz_route(environment.clone());
+    main_server
+}
 
-    let admin_server = warp::serve(healthz_route).run(([0, 0, 0, 0], admin_port));
+fn start_admin_server<O: Clone + Send + Sync + 'static>(
+    _logger: Arc<Logger>,
+    port: u16,
+    environment: Environment<O>,
+    should_terminate: futures::future::Shared<
+        impl warp::Future<Output = ()> + Send + Sync + 'static,
+    >,
+    terminate: Arc<dyn Fn() -> BoxFuture<'static, ()> + Send + Sync + 'static>,
+) -> impl warp::Future<Output = ()> + 'static {
+    let terminate = terminate.clone();
 
-    futures::future::join(main_server, admin_server).await;
+    let routes = routes::admin::make_healthz_route(environment.clone()).or(
+        routes::admin::make_termination_route(environment, terminate),
+    );
 
-    Ok(())
+    let (_, admin_server) =
+        warp::serve(routes).bind_with_graceful_shutdown(([0, 0, 0, 0], port), async {
+            should_terminate.await;
+        });
+
+    admin_server
 }

@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use futures::future::{BoxFuture, FutureExt};
 use log::{debug, error, trace, Logger};
-use serde::Serialize;
 use url::Url;
 use uuid::Uuid;
 use warp::filters::multipart::{form, FormData, Part};
@@ -14,41 +13,14 @@ use warp::Filter;
 use crate::environment::Environment;
 use crate::errors::{summarize_delete_errors, BackendError};
 use crate::io::parse_upload;
-use crate::recording::{ChildRecording, PartialRecording, UploadMetadata};
+use crate::recording::UploadMetadata;
 use crate::{audio::format::AudioFormat, db::Db, environment, mime_type::MimeType};
 
+pub mod admin;
 mod rejection;
+mod response;
 
-#[derive(Debug, Serialize)]
-#[serde(untagged)]
-enum SuccessResponse<'a> {
-    Children {
-        parent: String,
-        children: Vec<ChildRecording>,
-    },
-    Count(i64),
-    Healthz {
-        revision: Option<&'a str>,
-        timestamp: Option<&'a str>,
-        version: &'a str,
-    },
-    Lookup {
-        id: Uuid,
-    },
-    Random {
-        recordings: Vec<PartialRecording>,
-    },
-    Token {
-        id: String,
-        parent_id: String,
-    },
-    Upload {
-        id: String,
-        // TODO these should not be options
-        tokens: Option<Vec<Uuid>>,
-        key: Option<Uuid>,
-    },
-}
+use response::SuccessResponse;
 
 /// The maximum form data size to accept. This should be enforced by the HTTP gateway, so on the Rust side it’s set to an unreasonably large number.
 const MAX_CONTENT_LENGTH: u64 = 2 * 1024 * 1024 * 1024;
@@ -525,8 +497,8 @@ pub fn make_lookup_key_route<'a, O: Clone + Send + Sync + 'a>(
                 .map_err(error_handler)?;
 
             match option {
-                Some(id) => Ok(with_status(
-                    json(&SuccessResponse::Lookup { id }),
+                Some((id, tokens)) => Ok(with_status(
+                    json(&SuccessResponse::Lookup { id, tokens }),
                     StatusCode::OK,
                 )),
                 _ => Ok(with_status(json(&()), StatusCode::NOT_FOUND)),
@@ -541,18 +513,6 @@ pub fn make_lookup_key_route<'a, O: Clone + Send + Sync + 'a>(
         .and(warp::path::end())
         .and(warp::get())
         .and_then(handler)
-}
-
-pub fn make_healthz_route<'a, O: Clone + Send + Sync + 'a>(
-    _environment: Environment<O>,
-) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
-    warp::path("healthz").and(warp::get()).map(move || {
-        Ok(json(&SuccessResponse::Healthz {
-            revision: info::REVISION,
-            timestamp: info::BUILD_TIMESTAMP,
-            version: info::VERSION,
-        }))
-    })
 }
 
 async fn parse_recording_metadata(
