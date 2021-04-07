@@ -23,6 +23,7 @@ pub trait Db {
 
     fn lock_token(&self, token: &Uuid) -> BoxFuture<Result<Option<Uuid>, BackendError>>;
 
+    #[allow(clippy::type_complexity)]
     fn lookup_key(&self, key: &Uuid) -> BoxFuture<Result<Option<(Uuid, Vec<Uuid>)>, BackendError>>;
 
     fn insert(
@@ -309,6 +310,7 @@ mod postgres {
             .boxed()
         }
 
+        #[allow(clippy::type_complexity)]
         fn lookup_key(
             &self,
             key: &Uuid,
