@@ -1,15 +1,16 @@
 ARG RUST_VERSION
 
-FROM ekidd/rust-musl-builder:$RUST_VERSION AS builder
+FROM rust:$RUST_VERSION-alpine AS builder
 
 ARG TIMESTAMP
 ARG REVISION
 
 LABEL timestamp=$TIMESTAMP revision=$REVISION
 
-ENV OPENSSL_STATIC=1
-
 ENV USER=rust
+
+# building ring requires Perl
+RUN apk add -q musl-dev perl && rustup target add x86_64-unknown-linux-musl
 
 WORKDIR /home/rust/src
 RUN cargo new backend
