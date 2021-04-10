@@ -10,9 +10,9 @@ ENV BACKEND_REVISION=$REVISION
 
 WORKDIR /home/rust/src/backend
 
-COPY --chown=rust info ./info
-COPY --chown=rust initdb ./initdb
-COPY --chown=rust log ./log
+COPY info ./info
+COPY initdb ./initdb
+COPY log ./log
 
 # without the `touch`, the compiler doesn't appear to realize the code has changed
 RUN touch info/src/lib.rs && touch log/src/lib.rs && cargo build -p initdb --target x86_64-unknown-linux-musl --bin initdb --release --frozen --offline

@@ -7,8 +7,6 @@ ARG REVISION
 
 LABEL timestamp=$TIMESTAMP revision=$REVISION
 
-ENV USER=rust
-
 # building ring requires Perl
 RUN apk add -q musl-dev perl && rustup target add x86_64-unknown-linux-musl
 
@@ -19,10 +17,10 @@ WORKDIR /home/rust/src/backend
 # build dependencies
 RUN cargo new --lib info && cargo new initdb && cargo new --lib log && cargo new server
 
-COPY --chown=rust Cargo.lock Cargo.toml ./
+COPY Cargo.lock Cargo.toml ./
 
-COPY --chown=rust info/Cargo.toml info/Cargo.toml
-COPY --chown=rust initdb/Cargo.toml initdb/Cargo.toml
-COPY --chown=rust log/Cargo.toml log/Cargo.toml
-COPY --chown=rust server/Cargo.toml server/Cargo.toml
+COPY info/Cargo.toml info/Cargo.toml
+COPY initdb/Cargo.toml initdb/Cargo.toml
+COPY log/Cargo.toml log/Cargo.toml
+COPY server/Cargo.toml server/Cargo.toml
 RUN cargo build --target x86_64-unknown-linux-musl --bin backend --release --locked

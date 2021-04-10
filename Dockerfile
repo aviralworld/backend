@@ -11,9 +11,9 @@ ENV BACKEND_REVISION=$REVISION
 WORKDIR /home/rust/src/backend
 
 # build project
-COPY --chown=rust info ./info
-COPY --chown=rust log ./log
-COPY --chown=rust server ./server
+COPY info ./info
+COPY log ./log
+COPY server ./server
 
 # without the `touch`, the compiler doesn't appear to realize the code has changed
 RUN touch info/src/lib.rs && touch log/src/lib.rs && cargo build --target x86_64-unknown-linux-musl --bin backend --release --frozen --offline
