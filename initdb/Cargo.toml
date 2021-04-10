@@ -7,8 +7,8 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-movine = "0.10.0"
-postgres = "0.17.0"
+postgres = "0.19.1"
 dotenv = "0.15.0"
 info = { path = "../info" }
 log = { path = "../log" }
+movine = { version = "0.11.1", default-features = false, features = ["with-rustls"] }
