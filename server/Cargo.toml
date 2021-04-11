@@ -5,8 +5,6 @@ authors = ["Shiv Jha-Mathur"]
 edition = "2018"
 default-run = "backend"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [[bin]]
 name = "backend"
 path = "src/main.rs"
