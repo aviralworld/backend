@@ -81,7 +81,7 @@ async fn api_works() {
 
     prepare_db().await;
 
-    let show_output = get_variable("BACKEND_TESTING_SHOW_SERVER_OUTPUT") == "1";
+    let show_output = std::env::var("BACKEND_TESTING_SHOW_SERVER_OUTPUT") == Ok("1".to_string());
     let (child, initial_output) = start_server().await;
 
     let result = async move {
