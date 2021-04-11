@@ -128,7 +128,6 @@ dependencies = [
  "log 0.1.0",
  "mime",
  "movine",
- "once_cell",
  "postgres",
  "proptest",
  "reqwest",
