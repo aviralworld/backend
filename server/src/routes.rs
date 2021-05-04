@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use futures::future::{BoxFuture, FutureExt};
 use log::{debug, error, trace, Logger};
+use serde::Deserialize;
 use url::Url;
 use uuid::Uuid;
 use warp::filters::multipart::{form, FormData, Part};
@@ -21,6 +22,11 @@ mod rejection;
 mod response;
 
 use response::SuccessResponse;
+
+#[derive(Deserialize)]
+struct AvailabilityQuery {
+    name: String,
+}
 
 /// The maximum form data size to accept. This should be enforced by the HTTP gateway, so on the Rust side it’s set to an unreasonably large number.
 const MAX_CONTENT_LENGTH: u64 = 2 * 1024 * 1024 * 1024;
@@ -204,6 +210,7 @@ pub fn make_upload_route<'a, O: Clone + Send + Sync + 'a>(
                 debug!(logger, "Parsing submission...");
                 let upload = parse_upload(content).await.map_err(error_handler)?;
 
+                debug!(logger, "Parsing recording metadata...");
                 let metadata = parse_recording_metadata(logger.clone(), upload.metadata)
                     .await
                     .map_err(error_handler)?;
@@ -515,6 +522,42 @@ pub fn make_lookup_key_route<'a, O: Clone + Send + Sync + 'a>(
         .and_then(handler)
 }
 
+pub fn make_availability_route<'a, O: Clone + Send + Sync + 'a>(
+    environment: Environment<O>,
+) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
+    let recordings_path = environment.urls.recordings_path.clone();
+
+    let handler =
+        move |name: AvailabilityQuery| -> BoxFuture<Result<StatusCode, reject::Rejection>> {
+            let environment = environment.clone();
+            let name = name.name;
+
+            async move {
+                let available = environment
+                    .db
+                    .check_availability(&name)
+                    .await
+                    .map_err(|e| {
+                        rejection::Rejection::new(rejection::Context::availability(name.clone()), e)
+                    })?;
+
+                if available {
+                    Ok(StatusCode::OK)
+                } else {
+                    Ok(StatusCode::FORBIDDEN)
+                }
+            }
+            .boxed()
+        };
+
+    warp::path(recordings_path)
+        .and(warp::path("available"))
+        .and(warp::query::<AvailabilityQuery>())
+        .and(warp::path::end())
+        .and(warp::get())
+        .and_then(handler)
+}
+
 async fn parse_recording_metadata(
     _logger: Arc<Logger>,
     part: Part,
@@ -561,7 +604,7 @@ async fn verify_audio(
         .map_err(|_| BackendError::MalformedFormSubmission)?;
 
     // always use the first format
-    let formats = checker(&audio_data)?;
+    let formats = checker(&audio_data).map_err(|_| BackendError::MalformedFormSubmission)?;
     let format = formats
         .get(0)
         .ok_or(BackendError::UnrecognizedAudioFormat)?;
@@ -673,8 +716,8 @@ pub async fn format_rejection(
     rej: reject::Rejection,
 ) -> Result<WithStatus<Json>, reject::Rejection> {
     if let Some(r) = rej.find::<rejection::Rejection>() {
-        error!(logger, "Backend error"; "context" => ?r.context, "error" => ?r.error, "message" => %r.error);
         let e = &r.error;
+        error!(logger, "Backend error"; "context" => ?r.context, "error" => ?r.error, "status" => %status_code_for(e), "message" => %r.error);
         let flattened = r.flatten();
 
         return Ok(with_status(json(&flattened), status_code_for(e)));
@@ -689,7 +732,10 @@ fn status_code_for(e: &BackendError) -> StatusCode {
     match e {
         BadRequest | TooManyStreams(..) => StatusCode::BAD_REQUEST,
         BackendError::InvalidAudioFormat { .. } => StatusCode::UNSUPPORTED_MEDIA_TYPE,
-        InvalidId { .. } | PartsMissing | MalformedUploadMetadata { .. } => StatusCode::BAD_REQUEST,
+        InvalidId { .. }
+        | PartsMissing
+        | MalformedUploadMetadata { .. }
+        | MalformedFormSubmission { .. } => StatusCode::BAD_REQUEST,
         NameAlreadyExists => StatusCode::FORBIDDEN,
         InvalidToken { .. } => StatusCode::UNAUTHORIZED,
         _ => StatusCode::INTERNAL_SERVER_ERROR,

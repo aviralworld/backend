@@ -81,8 +81,19 @@ async fn api_works() {
 
     prepare_db().await;
 
-    let show_output = std::env::var("BACKEND_TESTING_SHOW_SERVER_OUTPUT") == Ok("1".to_string());
-    let (child, initial_output) = start_server().await;
+    let existing = std::env::var("BACKEND_TESTING_SERVER").ok();
+    let should_spawn_server = existing.is_none();
+
+    let admin_url = format!(
+        "{}:{}",
+        existing.unwrap_or_else(|| "http://127.0.0.1".to_string()),
+        get_variable("BACKEND_ADMIN_PORT")
+    );
+    let initial_output_and_child = if should_spawn_server {
+        Some(start_server().await)
+    } else {
+        None
+    };
 
     let result = async move {
         use futures::future::FutureExt;
@@ -93,16 +104,19 @@ async fn api_works() {
     }
     .await;
 
-    let admin_url = format!("http://127.0.0.1:{}", get_variable("BACKEND_ADMIN_PORT"));
     let _ = reqwest::Client::new()
         .post(format!("{}/terminate", admin_url))
         .send()
         .await
         .expect("terminate server");
 
-    if show_output {
-        print_child_output(initial_output, child).await;
-    };
+    let show_output = std::env::var("BACKEND_TESTING_SHOW_SERVER_OUTPUT") == Ok("1".to_string());
+    match (show_output, initial_output_and_child) {
+        (true, Some((child, initial_output))) => {
+            print_child_output(initial_output, child).await;
+        }
+        _ => {}
+    }
 
     result.expect("run tests");
 }
@@ -121,8 +135,9 @@ async fn test_api() {
     let cargo_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
     let base_path = Path::new(&cargo_dir);
     let file_path = base_path.join("tests").join("opus_file.ogg");
+    let failing_file_path = base_path.join("tests").join("failing.webm");
 
-    let (id, tokens, key) = test_upload(&file_path, &content_type).await;
+    let (id, tokens, key) = test_upload(&file_path, &failing_file_path, &content_type).await;
     test_duplicate_upload(&file_path, &content_type).await;
 
     test_key(&id, key).await;
@@ -378,9 +393,34 @@ async fn test_genders() {
 
 async fn test_upload(
     file_path: impl AsRef<Path>,
+    failing_file_path: impl AsRef<Path>,
     content_type: impl AsRef<str>,
 ) -> (String, Vec<String>, String) {
+    let mut availability_url = url_to(Some("available".to_owned()));
+    availability_url.set_query(Some("name=an%20UPLOADER"));
+    let availability_url = availability_url;
+
+    {
+        let response = reqwest::get(availability_url.clone())
+            .await
+            .expect("get /available");
+
+        assert_eq!(response.status(), 200);
+    }
+
     let bytes = fs::read("tests/simple_metadata.json").expect("read simple_metadata.json");
+
+    {
+        let response = upload_file(
+            failing_file_path.as_ref(),
+            content_type.as_ref(),
+            BOUNDARY.as_bytes(),
+            &bytes,
+        )
+        .await;
+
+        assert_eq!(response.status(), 400);
+    }
 
     let response = upload_file(
         file_path.as_ref(),
@@ -428,6 +468,14 @@ async fn test_upload(
     );
 
     let key = response.key.expect("get key from response");
+
+    {
+        let response = reqwest::get(availability_url)
+            .await
+            .expect("get /availability");
+
+        assert_eq!(response.status(), 403);
+    }
 
     (id, tokens, key)
 }
@@ -836,7 +884,9 @@ fn verify_recording_data(recording: &RetrievalResponse, id: &str, parent_id: &st
 fn url_to(path: Option<String>) -> Url {
     lazy_static! {
         static ref BASE_URL: Url = Url::parse(&format!(
-            "http://127.0.0.1:{}",
+            "{}:{}",
+            std::env::var("BACKEND_TESTING_SERVER")
+                .unwrap_or_else(|_| "http://127.0.0.1".to_string()),
             get_variable("BACKEND_PORT")
         ))
         .expect("parse URL");

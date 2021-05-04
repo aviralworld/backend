@@ -35,6 +35,7 @@ pub struct FlattenedRejection {
 #[serde(untagged)]
 pub enum Context {
     Ages,
+    Availability { name: String },
     Categories,
     Children { parent: String },
     Count,
@@ -51,6 +52,10 @@ pub enum Context {
 impl Context {
     pub fn ages() -> Context {
         Context::Ages
+    }
+
+    pub fn availability(name: String) -> Context {
+        Context::Availability { name }
     }
 
     pub fn categories() -> Context {

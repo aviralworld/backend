@@ -28,7 +28,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let logger = initialize_logger();
 
     let connection_string = get_variable("BACKEND_DB_CONNECTION_STRING");
-    let pool = sqlx::Pool::new(&connection_string)
+    let pool = sqlx::Pool::connect(&connection_string)
         .await
         .expect("create database pool from BACKEND_DB_CONNECTION_STRING");
     let db = PgDb::new(pool);
@@ -60,8 +60,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    println!(
-        "Generated tokens:\n{}",
+    info!(
+        logger,
+        "Generated tokens: {}",
         tokens
             .into_iter()
             .map(|t| format!("{}", t))

@@ -136,7 +136,8 @@ fn start_main_server<O: Clone + Send + Sync + 'static>(
     let retrieve_route = routes::make_retrieve_route(environment.clone());
     let lookup_key_route = routes::make_lookup_key_route(environment.clone());
     let random_route = routes::make_random_route(environment.clone());
-    let token_route = routes::make_token_route(environment);
+    let token_route = routes::make_token_route(environment.clone());
+    let availability_route = routes::make_availability_route(environment);
 
     let routes = formats_route
         .or(ages_list_route)
@@ -150,6 +151,7 @@ fn start_main_server<O: Clone + Send + Sync + 'static>(
         .or(retrieve_route)
         .or(lookup_key_route)
         .or(token_route)
+        .or(availability_route)
         .recover(move |r| routes::format_rejection(logger2.clone(), r));
 
     let (_, main_server) =
