@@ -380,6 +380,18 @@ async fn test_upload(
     file_path: impl AsRef<Path>,
     content_type: impl AsRef<str>,
 ) -> (String, Vec<String>, String) {
+    let mut availability_url = url_to(Some("available".to_owned()));
+    availability_url.set_query(Some("name=an%20UPLOADER"));
+    let availability_url = availability_url;
+
+    {
+        let response = reqwest::get(availability_url.clone())
+            .await
+            .expect("get /available");
+
+        assert_eq!(response.status(), 200);
+    }
+
     let bytes = fs::read("tests/simple_metadata.json").expect("read simple_metadata.json");
 
     let response = upload_file(
@@ -428,6 +440,14 @@ async fn test_upload(
     );
 
     let key = response.key.expect("get key from response");
+
+    {
+        let response = reqwest::get(availability_url)
+            .await
+            .expect("get /availability");
+
+        assert_eq!(response.status(), 403);
+    }
 
     (id, tokens, key)
 }

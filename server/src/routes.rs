@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use futures::future::{BoxFuture, FutureExt};
 use log::{debug, error, trace, Logger};
+use serde::Deserialize;
 use url::Url;
 use uuid::Uuid;
 use warp::filters::multipart::{form, FormData, Part};
@@ -21,6 +22,11 @@ mod rejection;
 mod response;
 
 use response::SuccessResponse;
+
+#[derive(Deserialize)]
+struct AvailabilityQuery {
+    name: String,
+}
 
 /// The maximum form data size to accept. This should be enforced by the HTTP gateway, so on the Rust side it’s set to an unreasonably large number.
 const MAX_CONTENT_LENGTH: u64 = 2 * 1024 * 1024 * 1024;
@@ -510,6 +516,42 @@ pub fn make_lookup_key_route<'a, O: Clone + Send + Sync + 'a>(
     warp::path(recordings_path)
         .and(warp::path("lookup"))
         .and(warp::path::param::<String>())
+        .and(warp::path::end())
+        .and(warp::get())
+        .and_then(handler)
+}
+
+pub fn make_availability_route<'a, O: Clone + Send + Sync + 'a>(
+    environment: Environment<O>,
+) -> impl warp::Filter<Extract = (impl Reply,), Error = reject::Rejection> + Clone + 'a {
+    let recordings_path = environment.urls.recordings_path.clone();
+
+    let handler =
+        move |name: AvailabilityQuery| -> BoxFuture<Result<StatusCode, reject::Rejection>> {
+            let environment = environment.clone();
+            let name = name.name;
+
+            async move {
+                let available = environment
+                    .db
+                    .check_availability(&name)
+                    .await
+                    .map_err(|e| {
+                        rejection::Rejection::new(rejection::Context::availability(name.clone()), e)
+                    })?;
+
+                if available {
+                    Ok(StatusCode::OK)
+                } else {
+                    Ok(StatusCode::FORBIDDEN)
+                }
+            }
+            .boxed()
+        };
+
+    warp::path(recordings_path)
+        .and(warp::path("available"))
+        .and(warp::query::<AvailabilityQuery>())
         .and(warp::path::end())
         .and(warp::get())
         .and_then(handler)

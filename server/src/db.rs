@@ -9,6 +9,8 @@ use crate::recording::{
 use crate::{audio::format::AudioFormat, errors::BackendError, mime_type::MimeType};
 
 pub trait Db {
+    fn check_availability(&self, name: &str) -> BoxFuture<Result<bool, BackendError>>;
+
     fn children(&self, id: &Uuid) -> BoxFuture<Result<Vec<ChildRecording>, BackendError>>;
 
     fn count_all(&self) -> BoxFuture<Result<i64, BackendError>>;
@@ -104,6 +106,24 @@ mod postgres {
 
     // these can be simplified once async functions in traits are stabilized
     impl super::Db for PgDb {
+        fn check_availability(&self, name: &str) -> BoxFuture<Result<bool, BackendError>> {
+            let name = name.to_owned();
+
+            async move {
+                let query =
+                    sqlx::query_as::<_, (bool,)>(include_str!("queries/check_availability.sql"));
+
+                let (exists,) = query
+                    .bind(name)
+                    .fetch_one(&self.pool)
+                    .await
+                    .map_err(map_sqlx_error)?;
+
+                Ok(!exists)
+            }
+            .boxed()
+        }
+
         fn children(&self, id: &Uuid) -> BoxFuture<Result<Vec<ChildRecording>, BackendError>> {
             let id = *id;
 
