@@ -135,8 +135,9 @@ async fn test_api() {
     let cargo_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
     let base_path = Path::new(&cargo_dir);
     let file_path = base_path.join("tests").join("opus_file.ogg");
+    let failing_file_path = base_path.join("tests").join("failing.webm");
 
-    let (id, tokens, key) = test_upload(&file_path, &content_type).await;
+    let (id, tokens, key) = test_upload(&file_path, &failing_file_path, &content_type).await;
     test_duplicate_upload(&file_path, &content_type).await;
 
     test_key(&id, key).await;
@@ -392,6 +393,7 @@ async fn test_genders() {
 
 async fn test_upload(
     file_path: impl AsRef<Path>,
+    failing_file_path: impl AsRef<Path>,
     content_type: impl AsRef<str>,
 ) -> (String, Vec<String>, String) {
     let mut availability_url = url_to(Some("available".to_owned()));
@@ -407,6 +409,18 @@ async fn test_upload(
     }
 
     let bytes = fs::read("tests/simple_metadata.json").expect("read simple_metadata.json");
+
+    {
+        let response = upload_file(
+            failing_file_path.as_ref(),
+            content_type.as_ref(),
+            BOUNDARY.as_bytes(),
+            &bytes,
+        )
+        .await;
+
+        assert_eq!(response.status(), 400);
+    }
 
     let response = upload_file(
         file_path.as_ref(),

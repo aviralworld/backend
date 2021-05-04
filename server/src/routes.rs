@@ -604,7 +604,7 @@ async fn verify_audio(
         .map_err(|_| BackendError::MalformedFormSubmission)?;
 
     // always use the first format
-    let formats = checker(&audio_data)?;
+    let formats = checker(&audio_data).map_err(|_| BackendError::MalformedFormSubmission)?;
     let format = formats
         .get(0)
         .ok_or(BackendError::UnrecognizedAudioFormat)?;
@@ -732,7 +732,7 @@ fn status_code_for(e: &BackendError) -> StatusCode {
     match e {
         BadRequest | TooManyStreams(..) => StatusCode::BAD_REQUEST,
         BackendError::InvalidAudioFormat { .. } => StatusCode::UNSUPPORTED_MEDIA_TYPE,
-        InvalidId { .. } | PartsMissing | MalformedUploadMetadata { .. } | MalformedFfprobeOutput { .. } => StatusCode::BAD_REQUEST,
+        InvalidId { .. } | PartsMissing | MalformedUploadMetadata { .. } | MalformedFormSubmission { .. } => StatusCode::BAD_REQUEST,
         NameAlreadyExists => StatusCode::FORBIDDEN,
         InvalidToken { .. } => StatusCode::UNAUTHORIZED,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
