@@ -732,7 +732,10 @@ fn status_code_for(e: &BackendError) -> StatusCode {
     match e {
         BadRequest | TooManyStreams(..) => StatusCode::BAD_REQUEST,
         BackendError::InvalidAudioFormat { .. } => StatusCode::UNSUPPORTED_MEDIA_TYPE,
-        InvalidId { .. } | PartsMissing | MalformedUploadMetadata { .. } | MalformedFormSubmission { .. } => StatusCode::BAD_REQUEST,
+        InvalidId { .. }
+        | PartsMissing
+        | MalformedUploadMetadata { .. }
+        | MalformedFormSubmission { .. } => StatusCode::BAD_REQUEST,
         NameAlreadyExists => StatusCode::FORBIDDEN,
         InvalidToken { .. } => StatusCode::UNAUTHORIZED,
         _ => StatusCode::INTERNAL_SERVER_ERROR,

@@ -60,11 +60,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    info!(logger, "Generated tokens: {}", tokens
+    info!(
+        logger,
+        "Generated tokens: {}",
+        tokens
             .into_iter()
             .map(|t| format!("{}", t))
             .collect::<Vec<_>>()
-            .join("\n"));
+            .join("\n")
+    );
 
     Ok(())
 }
