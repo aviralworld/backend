@@ -716,8 +716,8 @@ pub async fn format_rejection(
     rej: reject::Rejection,
 ) -> Result<WithStatus<Json>, reject::Rejection> {
     if let Some(r) = rej.find::<rejection::Rejection>() {
-        error!(logger, "Backend error"; "context" => ?r.context, "error" => ?r.error, "message" => %r.error);
         let e = &r.error;
+        error!(logger, "Backend error"; "context" => ?r.context, "error" => ?r.error, "status" => %status_code_for(e), "message" => %r.error);
         let flattened = r.flatten();
 
         return Ok(with_status(json(&flattened), status_code_for(e)));
