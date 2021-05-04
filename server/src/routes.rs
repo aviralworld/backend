@@ -210,6 +210,7 @@ pub fn make_upload_route<'a, O: Clone + Send + Sync + 'a>(
                 debug!(logger, "Parsing submission...");
                 let upload = parse_upload(content).await.map_err(error_handler)?;
 
+                debug!(logger, "Parsing recording metadata...");
                 let metadata = parse_recording_metadata(logger.clone(), upload.metadata)
                     .await
                     .map_err(error_handler)?;
@@ -731,7 +732,7 @@ fn status_code_for(e: &BackendError) -> StatusCode {
     match e {
         BadRequest | TooManyStreams(..) => StatusCode::BAD_REQUEST,
         BackendError::InvalidAudioFormat { .. } => StatusCode::UNSUPPORTED_MEDIA_TYPE,
-        InvalidId { .. } | PartsMissing | MalformedUploadMetadata { .. } => StatusCode::BAD_REQUEST,
+        InvalidId { .. } | PartsMissing | MalformedUploadMetadata { .. } | MalformedFfprobeOutput { .. } => StatusCode::BAD_REQUEST,
         NameAlreadyExists => StatusCode::FORBIDDEN,
         InvalidToken { .. } => StatusCode::UNAUTHORIZED,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
