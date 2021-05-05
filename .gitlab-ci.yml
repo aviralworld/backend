@@ -147,8 +147,8 @@ docker-db:
     - echo $KANIKO_AUTH_CONFIG > /kaniko/.docker/config.json
     - export build_timestamp=`date +%Y%m%d%H%M%S`
     - export tag=`echo $(cat .gitlab-ci-timestamp)`
-    - echo $tag
     - /kaniko/executor --context $CI_PROJECT_DIR --dockerfile $CI_PROJECT_DIR/Dockerfile.db --cache=true --destination=$CI_REGISTRY_IMAGE/db:$tag --destination=$CI_REGISTRY_IMAGE/db:latest --build-arg BASE_IMAGE=$CI_REGISTRY_IMAGE/base:$tag --build-arg REVISION=$CI_COMMIT_SHA --build-arg POSTGRES_VERSION=12 --build-arg TIMESTAMP=$build_timestamp
+    - echo $tag
   only:
     - master
   interruptible: yes
