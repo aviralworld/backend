@@ -1,14 +1,10 @@
 use std::sync::Arc;
 
 use log::{error, Logger};
-use uuid::Uuid;
-use warp::filters::multipart::form;
 use warp::http::StatusCode;
 use warp::reject;
-use warp::reply::{json, with_status, Json, Reply, WithStatus};
-use warp::{filters::BoxedFilter, Filter};
+use warp::reply::{json, with_status, Json, WithStatus};
 
-use crate::environment::Environment;
 use crate::errors::BackendError;
 
 pub mod admin;
@@ -17,196 +13,12 @@ mod query;
 mod rejection;
 mod response;
 
+pub use internal::*;
+
 /// The maximum form data size to accept. This should be enforced by
 /// the HTTP gateway, so on the Rust side it’s set to an unreasonably
 /// large number.
 const MAX_CONTENT_LENGTH: u64 = 2 * 1024 * 1024 * 1024;
-
-type Route = BoxedFilter<(Box<dyn Reply>,)>;
-
-pub fn make_formats_route<O: Clone + Send + Sync + 'static>(environment: Environment<O>) -> Route {
-    let recordings_path = environment.urls.recordings_path.clone();
-
-    warp::path(recordings_path)
-        .and(warp::path("formats"))
-        .and(warp::path::end())
-        .and(warp::get())
-        .map(move || environment.clone())
-        .and_then(handlers::formats)
-        .boxed()
-}
-
-pub fn make_ages_list_route<O: Clone + Send + Sync + 'static>(
-    environment: Environment<O>,
-) -> Route {
-    let recordings_path = environment.urls.recordings_path.clone();
-
-    warp::path(recordings_path)
-        .and(warp::path("ages"))
-        .and(warp::path::end())
-        .and(warp::get())
-        .map(move || environment.clone())
-        .and_then(handlers::ages_list)
-        .boxed()
-}
-
-pub fn make_categories_list_route<O: Clone + Send + Sync + 'static>(
-    environment: Environment<O>,
-) -> Route {
-    let recordings_path = environment.urls.recordings_path.clone();
-
-    // TODO make this cacheable
-    warp::path(recordings_path)
-        .and(warp::path("categories"))
-        .and(warp::path::end())
-        .and(warp::get())
-        .map(move || environment.clone())
-        .and_then(handlers::categories_list)
-        .boxed()
-}
-
-pub fn make_genders_list_route<O: Clone + Send + Sync + 'static>(
-    environment: Environment<O>,
-) -> Route {
-    let recordings_path = environment.urls.recordings_path.clone();
-
-    warp::path(recordings_path)
-        .and(warp::path("genders"))
-        .and(warp::path::end())
-        .and(warp::get())
-        .map(move || environment.clone())
-        .and_then(handlers::genders_list)
-        .boxed()
-}
-
-pub fn make_count_route<O: Clone + Send + Sync + 'static>(environment: Environment<O>) -> Route {
-    let recordings_path = environment.urls.recordings_path.clone();
-
-    warp::path(recordings_path)
-        .and(warp::path("count"))
-        .and(warp::path::end())
-        .and(warp::get())
-        .map(move || environment.clone())
-        .and_then(handlers::count)
-        .boxed()
-}
-
-pub fn make_upload_route<O: Clone + Send + Sync + 'static>(environment: Environment<O>) -> Route {
-    let urls = environment.urls.clone();
-
-    // TODO this should stream the body from the request, but warp
-    // doesn't support that yet; however, see
-    // <https://github.com/cetra3/mpart-async>
-
-    warp::path(urls.recordings_path.clone())
-        .and(warp::path::end())
-        .and(warp::post())
-        .map(move || environment.clone())
-        .and(form().max_length(MAX_CONTENT_LENGTH))
-        .and_then(handlers::upload)
-        .boxed()
-}
-
-pub fn make_children_route<O: Clone + Send + Sync + 'static>(environment: Environment<O>) -> Route {
-    let recordings_path = environment.urls.recordings_path.clone();
-
-    warp::any()
-        .map(move || environment.clone())
-        .and(warp::path(recordings_path))
-        .and(warp::path!("id" / String / "children"))
-        .and(warp::path::end())
-        .and(warp::get())
-        .and_then(handlers::children)
-        .boxed()
-}
-
-pub fn make_delete_route<O: Clone + Send + Sync + 'static>(environment: Environment<O>) -> Route {
-    let recordings_path = environment.urls.recordings_path.clone();
-
-    warp::any()
-        .map(move || environment.clone())
-        .and(warp::path(recordings_path))
-        .and(warp::path("id"))
-        .and(warp::path::param::<String>())
-        .and(warp::path::end())
-        .and(warp::delete())
-        .and_then(handlers::delete)
-        .boxed()
-}
-
-pub fn make_retrieve_route<O: Clone + Send + Sync + 'static>(environment: Environment<O>) -> Route {
-    let recordings_path = environment.urls.recordings_path.clone();
-
-    warp::any()
-        .map(move || environment.clone())
-        .and(warp::path(recordings_path))
-        .and(warp::path("id"))
-        .and(warp::path::param::<String>())
-        .and(warp::path::end())
-        .and(warp::get())
-        .and_then(handlers::retrieve)
-        .boxed()
-}
-
-pub fn make_random_route<O: Clone + Send + Sync + 'static>(environment: Environment<O>) -> Route {
-    let recordings_path = environment.urls.recordings_path.clone();
-
-    warp::any()
-        .map(move || environment.clone())
-        .and(warp::path(recordings_path))
-        .and(warp::path("random"))
-        .and(warp::path::param::<u8>())
-        .and(warp::path::end())
-        .and(warp::get())
-        .and_then(handlers::random)
-        .boxed()
-}
-
-pub fn make_token_route<O: Clone + Send + Sync + 'static>(environment: Environment<O>) -> Route {
-    let recordings_path = environment.urls.recordings_path.clone();
-
-    warp::any()
-        .map(move || environment.clone())
-        .and(warp::path(recordings_path))
-        .and(warp::path("token"))
-        .and(warp::path::param::<Uuid>())
-        .and(warp::path::end())
-        .and(warp::get())
-        .and_then(handlers::token)
-        .boxed()
-}
-
-pub fn make_lookup_key_route<O: Clone + Send + Sync + 'static>(
-    environment: Environment<O>,
-) -> Route {
-    let recordings_path = environment.urls.recordings_path.clone();
-
-    warp::any()
-        .map(move || environment.clone())
-        .and(warp::path(recordings_path))
-        .and(warp::path("lookup"))
-        .and(warp::path::param::<String>())
-        .and(warp::path::end())
-        .and(warp::get())
-        .and_then(handlers::lookup)
-        .boxed()
-}
-
-pub fn make_availability_route<O: Clone + Send + Sync + 'static>(
-    environment: Environment<O>,
-) -> Route {
-    let recordings_path = environment.urls.recordings_path.clone();
-
-    warp::any()
-        .map(move || environment.clone())
-        .and(warp::path(recordings_path))
-        .and(warp::path("available"))
-        .and(warp::query::<query::AvailabilityQuery>())
-        .and(warp::path::end())
-        .and(warp::get())
-        .and_then(handlers::availability)
-        .boxed()
-}
 
 pub async fn format_rejection(
     logger: Arc<Logger>,
@@ -237,4 +49,58 @@ fn status_code_for(e: &BackendError) -> StatusCode {
         InvalidToken { .. } => StatusCode::UNAUTHORIZED,
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     }
+}
+
+mod internal {
+    use uuid::Uuid;
+    use warp::filters::multipart::form;
+    use warp::filters::BoxedFilter;
+    use warp::path::end;
+    use warp::Filter;
+    use warp::Reply;
+    use warp::{delete, get as g, path as p, path::param as par, post, query};
+
+    use super::{handlers, query as q, MAX_CONTENT_LENGTH};
+    use crate::environment::Environment;
+
+    type Route = BoxedFilter<(Box<dyn Reply>,)>;
+
+    macro_rules! route_filter {
+    ($route_variable:ident; $first:expr) => (let $route_variable = $route_variable.and($first););
+    ($route_variable:ident; $first:expr, $($rest:expr),+) => (
+        let $route_variable = $route_variable.and($first);
+        route_filter!($route_variable; $($rest),+);
+    )
+}
+
+    macro_rules! route {
+    ($name:ident => $handler:ident, $route_variable:ident; $($filters:expr),+) => (
+        pub fn $name<O: Clone + Send + Sync + 'static>(environment: Environment<O>) -> Route {
+            let r = environment.urls.recordings_path.clone();
+
+            let $route_variable = warp::any()
+                .map(move || environment.clone())
+                .and(p(r));
+
+            route_filter!($route_variable; $($filters),+);
+
+            $route_variable.and_then(handlers::$handler)
+                .boxed()
+        }
+    );
+}
+
+    route!(make_formats_route => formats, rt; p("formats"), end(), g());
+    route!(make_ages_list_route => ages_list, rt; p("ages"), end(), g());
+    route!(make_categories_list_route => categories_list, rt; p("categories"), end(), g());
+    route!(make_genders_list_route => genders_list, rt; p("genders"), end(), g());
+    route!(make_count_route => count, rt; p("count"), end(), g());
+    route!(make_upload_route => upload, rt; end(), post(), form().max_length(MAX_CONTENT_LENGTH));
+    route!(make_children_route => children, rt; p!("id" / String / "children"), end(), g());
+    route!(make_delete_route => delete, rt; p("id"), par::<String>(), end(), delete());
+    route!(make_retrieve_route => retrieve, rt; p("id"), par::<String>(), end(), g());
+    route!(make_random_route => random, rt; p("random"), par::<u8>(), end(), g());
+    route!(make_token_route => token, rt; p("token"), par::<Uuid>(), end(), g());
+    route!(make_lookup_route => lookup, rt; p("lookup"), par::<String>(), end(), g());
+    route!(make_availability_route => availability, rt; p("available"), query::<q::AvailabilityQuery>(), end(), g());
 }

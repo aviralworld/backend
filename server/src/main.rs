@@ -123,22 +123,24 @@ fn start_main_server<O: Clone + Send + Sync + 'static>(
         impl warp::Future<Output = ()> + Send + Sync + 'static,
     >,
 ) -> impl warp::Future<Output = ()> + 'static {
+    use routes as r;
+
     let logger2 = logger.clone();
 
     let mut routes = vec![
-        routes::make_formats_route(environment.clone()),
-        routes::make_ages_list_route(environment.clone()),
-        routes::make_categories_list_route(environment.clone()),
-        routes::make_genders_list_route(environment.clone()),
-        routes::make_count_route(environment.clone()),
-        routes::make_upload_route(environment.clone()),
-        routes::make_children_route(environment.clone()),
-        routes::make_delete_route(environment.clone()),
-        routes::make_retrieve_route(environment.clone()),
-        routes::make_random_route(environment.clone()),
-        routes::make_token_route(environment.clone()),
-        routes::make_lookup_key_route(environment.clone()),
-        routes::make_availability_route(environment),
+        r::make_formats_route(environment.clone()),
+        r::make_ages_list_route(environment.clone()),
+        r::make_categories_list_route(environment.clone()),
+        r::make_genders_list_route(environment.clone()),
+        r::make_count_route(environment.clone()),
+        r::make_upload_route(environment.clone()),
+        r::make_children_route(environment.clone()),
+        r::make_delete_route(environment.clone()),
+        r::make_retrieve_route(environment.clone()),
+        r::make_random_route(environment.clone()),
+        r::make_token_route(environment.clone()),
+        r::make_lookup_route(environment.clone()),
+        r::make_availability_route(environment),
     ];
 
     let first = routes.pop().expect("get first route");

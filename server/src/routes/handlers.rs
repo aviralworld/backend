@@ -54,6 +54,7 @@ pub async fn categories_list<O: Clone + Send + Sync>(environment: Environment<O>
         .await
         .map_err(|e: BackendError| r::Rejection::new(r::Context::categories(), e))?;
 
+    // TODO make this cacheable
     Ok(as_box!(json(&categories)))
 }
 
