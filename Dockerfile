@@ -22,6 +22,8 @@ FROM mwader/static-ffmpeg:$FFMPEG_VERSION AS ffmpeg
 
 FROM scratch
 
+USER 1000
+
 ARG TIMESTAMP
 ARG REVISION
 LABEL timestamp=$TIMESTAMP revision=$REVISION
