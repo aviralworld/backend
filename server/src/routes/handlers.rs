@@ -14,7 +14,11 @@ use crate::environment::Environment;
 use crate::errors::{summarize_delete_errors, BackendError};
 use crate::io::parse_upload;
 use crate::recording::UploadMetadata;
-use crate::routes::{query::AvailabilityQuery, rejection as r, response::SuccessResponse};
+use crate::routes::{
+    query::AvailabilityQuery,
+    rejection::{Context, Rejection},
+    response::SuccessResponse,
+};
 use crate::{audio::format::AudioFormat, db::Db, environment, mime_type::MimeType};
 
 macro_rules! as_box {
@@ -30,7 +34,7 @@ pub async fn formats<O: Clone + Send + Sync>(environment: Environment<O>) -> Rou
         .db
         .retrieve_format_essences()
         .await
-        .map_err(|e: BackendError| r::Rejection::new(r::Context::formats(), e))?;
+        .map_err(|e: BackendError| Rejection::new(Context::formats(), e))?;
 
     // TODO make this cacheable
     Ok(as_box!(json(&formats)))
@@ -41,7 +45,7 @@ pub async fn ages_list<O: Clone + Send + Sync>(environment: Environment<O>) -> R
         .db
         .retrieve_ages()
         .await
-        .map_err(|e: BackendError| r::Rejection::new(r::Context::ages(), e))?;
+        .map_err(|e: BackendError| Rejection::new(Context::ages(), e))?;
 
     // TODO make this cacheable
     Ok(as_box!(json(&ages)))
@@ -52,7 +56,7 @@ pub async fn categories_list<O: Clone + Send + Sync>(environment: Environment<O>
         .db
         .retrieve_categories()
         .await
-        .map_err(|e: BackendError| r::Rejection::new(r::Context::categories(), e))?;
+        .map_err(|e: BackendError| Rejection::new(Context::categories(), e))?;
 
     // TODO make this cacheable
     Ok(as_box!(json(&categories)))
@@ -63,7 +67,7 @@ pub async fn genders_list<O: Clone + Send + Sync>(environment: Environment<O>) -
         .db
         .retrieve_genders()
         .await
-        .map_err(|e: BackendError| r::Rejection::new(r::Context::genders(), e))?;
+        .map_err(|e: BackendError| Rejection::new(Context::genders(), e))?;
 
     // TODO make this cacheable
     Ok(as_box!(json(&genders)))
@@ -74,7 +78,7 @@ pub async fn count<O: Clone + Send + Sync>(environment: Environment<O>) -> Route
         .db
         .count_all()
         .await
-        .map_err(|e: BackendError| r::Rejection::new(r::Context::count(), e))?;
+        .map_err(|e: BackendError| Rejection::new(Context::count(), e))?;
 
     Ok(as_box!(json(&SuccessResponse::Count(count))))
 }
@@ -92,7 +96,7 @@ pub async fn upload<O: Clone + Send + Sync + 'static>(
         ..
     } = environment.clone();
 
-    let error_handler = |e: BackendError| r::Rejection::new(r::Context::upload(None), e);
+    let error_handler = |e: BackendError| Rejection::new(Context::upload(None), e);
 
     debug!(logger, "Parsing submission...");
     let upload = parse_upload(content).await.map_err(error_handler)?;
@@ -147,7 +151,7 @@ pub async fn upload<O: Clone + Send + Sync + 'static>(
 
     let error_handler = |e: BackendError| {
         // TODO delete row from DB
-        r::Rejection::new(r::Context::upload(Some(id_as_str.clone())), e)
+        Rejection::new(Context::upload(Some(id_as_str.clone())), e)
     };
 
     // should this punt to a queue? is that necessary?
@@ -181,8 +185,7 @@ pub async fn children<O: Clone + Send + Sync>(
     environment: Environment<O>,
     parent: String,
 ) -> RouteResult {
-    let error_handler =
-        |e: BackendError| r::Rejection::new(r::Context::children(parent.clone()), e);
+    let error_handler = |e: BackendError| Rejection::new(Context::children(parent.clone()), e);
 
     let id = Uuid::parse_str(&parent)
         .map_err(|_| BackendError::InvalidId(parent.clone()))
@@ -199,7 +202,7 @@ pub async fn delete<O: Clone + Send + Sync>(
     environment: Environment<O>,
     id: String,
 ) -> RouteResult {
-    let error_handler = |e: BackendError| r::Rejection::new(r::Context::delete(id.clone()), e);
+    let error_handler = |e: BackendError| Rejection::new(Context::delete(id.clone()), e);
 
     let id = Uuid::parse_str(&id)
         .map_err(|_| BackendError::InvalidId(id.clone()))
@@ -223,7 +226,7 @@ pub async fn retrieve<O: Clone + Send + Sync>(
 ) -> RouteResult {
     use crate::recording::Recording;
 
-    let error_handler = |e: BackendError| r::Rejection::new(r::Context::retrieve(id.clone()), e);
+    let error_handler = |e: BackendError| Rejection::new(Context::retrieve(id.clone()), e);
 
     let id = Uuid::parse_str(&id)
         .map_err(|_| BackendError::InvalidId(id.clone()))
@@ -248,7 +251,7 @@ pub async fn retrieve<O: Clone + Send + Sync>(
 pub async fn random<O: Clone + Send + Sync>(environment: Environment<O>, count: u8) -> RouteResult {
     let count = count as i16;
 
-    let error_handler = |e: BackendError| r::Rejection::new(r::Context::random(count), e);
+    let error_handler = |e: BackendError| Rejection::new(Context::random(count), e);
 
     let recordings = environment
         .db
@@ -260,7 +263,7 @@ pub async fn random<O: Clone + Send + Sync>(environment: Environment<O>, count: 
 }
 
 pub async fn token<O: Clone + Send + Sync>(environment: Environment<O>, id: Uuid) -> RouteResult {
-    let error_handler = |e: BackendError| r::Rejection::new(r::Context::token(id.to_string()), e);
+    let error_handler = |e: BackendError| Rejection::new(Context::token(id.to_string()), e);
 
     let token = environment
         .db
@@ -284,7 +287,7 @@ pub async fn lookup<O: Clone + Send + Sync>(
     environment: Environment<O>,
     key: String,
 ) -> RouteResult {
-    let error_handler = |e: BackendError| r::Rejection::new(r::Context::lookup_key(key.clone()), e);
+    let error_handler = |e: BackendError| Rejection::new(Context::lookup_key(key.clone()), e);
 
     let key = Uuid::parse_str(&key)
         .map_err(|_| BackendError::InvalidId(key.clone()))
@@ -316,7 +319,7 @@ pub async fn availability<O: Clone + Send + Sync>(
         .db
         .check_availability(&name)
         .await
-        .map_err(|e| r::Rejection::new(r::Context::availability(name.clone()), e))?;
+        .map_err(|e| Rejection::new(Context::availability(name.clone()), e))?;
 
     if available {
         Ok(as_box!(StatusCode::OK))
@@ -398,7 +401,7 @@ async fn complete_upload<O: Clone + Send + Sync + 'static>(
     email: Option<String>,
     mime_type: MimeType,
     verified_audio: Vec<u8>,
-    error_handler: impl Fn(BackendError) -> r::Rejection,
+    error_handler: impl Fn(BackendError) -> Rejection,
 ) -> Result<WithHeader<WithStatus<Json>>, reject::Rejection> {
     let logger = environment.logger.clone();
     let db = environment.db.clone();
