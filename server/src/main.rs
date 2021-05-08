@@ -123,35 +123,31 @@ fn start_main_server<O: Clone + Send + Sync + 'static>(
         impl warp::Future<Output = ()> + Send + Sync + 'static,
     >,
 ) -> impl warp::Future<Output = ()> + 'static {
+    use routes as r;
+
     let logger2 = logger.clone();
 
-    let formats_route = routes::make_formats_route(environment.clone());
-    let ages_list_route = routes::make_ages_list_route(environment.clone());
-    let categories_list_route = routes::make_categories_list_route(environment.clone());
-    let genders_list_route = routes::make_genders_list_route(environment.clone());
-    let count_route = routes::make_count_route(environment.clone());
-    let upload_route = routes::make_upload_route(environment.clone());
-    let children_route = routes::make_children_route(environment.clone());
-    let delete_route = routes::make_delete_route(environment.clone());
-    let retrieve_route = routes::make_retrieve_route(environment.clone());
-    let lookup_key_route = routes::make_lookup_key_route(environment.clone());
-    let random_route = routes::make_random_route(environment.clone());
-    let token_route = routes::make_token_route(environment.clone());
-    let availability_route = routes::make_availability_route(environment);
+    let mut routes = vec![
+        r::make_formats_route(environment.clone()),
+        r::make_ages_list_route(environment.clone()),
+        r::make_categories_list_route(environment.clone()),
+        r::make_genders_list_route(environment.clone()),
+        r::make_count_route(environment.clone()),
+        r::make_upload_route(environment.clone()),
+        r::make_children_route(environment.clone()),
+        r::make_delete_route(environment.clone()),
+        r::make_retrieve_route(environment.clone()),
+        r::make_random_route(environment.clone()),
+        r::make_token_route(environment.clone()),
+        r::make_lookup_route(environment.clone()),
+        r::make_availability_route(environment),
+    ];
 
-    let routes = formats_route
-        .or(ages_list_route)
-        .or(categories_list_route)
-        .or(genders_list_route)
-        .or(count_route)
-        .or(upload_route)
-        .or(children_route)
-        .or(delete_route)
-        .or(random_route)
-        .or(retrieve_route)
-        .or(lookup_key_route)
-        .or(token_route)
-        .or(availability_route)
+    let first = routes.pop().expect("get first route");
+
+    let routes = routes
+        .into_iter()
+        .fold(first, |e, r| e.or(r).unify().boxed())
         .recover(move |r| routes::format_rejection(logger2.clone(), r));
 
     let (_, main_server) =
