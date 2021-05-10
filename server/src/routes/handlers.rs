@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use log::{debug, error, trace, Logger};
 use url::Url;
@@ -21,66 +22,87 @@ use crate::routes::{
 };
 use crate::{audio::format::AudioFormat, db::Db, environment, mime_type::MimeType};
 
-macro_rules! as_box {
-    ($expression:expr) => {
-        Ok(Box::new($expression) as Box<dyn Reply>)
+const SERVER_TIMING_HEADER: &str = "server-timing";
+type RouteResult = Result<Box<dyn Reply>, reject::Rejection>;
+
+macro_rules! timed {
+    ($($expression:stmt);+) => {
+        let start = Instant::now();
+
+        // TODO when `try` blocks are stabilized, we can wrap the body
+        // and return the headers even on errors
+        let result = { $($expression)+ };
+
+        Ok(Box::new(with_header(
+            result,
+            SERVER_TIMING_HEADER,
+            format_server_timing(start.elapsed()),
+        )) as Box<dyn Reply>)
     };
 }
 
-type RouteResult = Result<Box<dyn Reply>, reject::Rejection>;
-
 pub async fn formats<O: SafeStore>(environment: Environment<O>) -> RouteResult {
-    let formats = environment
-        .db
-        .retrieve_format_essences()
-        .await
-        .map_err(|e: BackendError| Rejection::new(Context::formats(), e))?;
+    timed! {
+        let formats = environment
+            .db
+            .retrieve_format_essences()
+            .await
+            .map_err(|e: BackendError| Rejection::new(Context::formats(), e))?;
 
-    // TODO make this cacheable
-    as_box!(json(&formats))
+        // TODO make this cacheable
+        json(&formats)
+    }
 }
 
 pub async fn ages_list<O: SafeStore>(environment: Environment<O>) -> RouteResult {
-    let ages = environment
-        .db
-        .retrieve_ages()
-        .await
-        .map_err(|e: BackendError| Rejection::new(Context::ages(), e))?;
+    timed! {
+        let ages = environment
+            .db
+            .retrieve_ages()
+            .await
+            .map_err(|e: BackendError| Rejection::new(Context::ages(), e))?;
 
-    // TODO make this cacheable
-    as_box!(json(&ages))
+        // TODO make this cacheable
+        json(&ages)
+    }
 }
 
 pub async fn categories_list<O: SafeStore>(environment: Environment<O>) -> RouteResult {
+    timed! {
     let categories = environment
         .db
         .retrieve_categories()
         .await
         .map_err(|e: BackendError| Rejection::new(Context::categories(), e))?;
 
-    // TODO make this cacheable
-    as_box!(json(&categories))
+        // TODO make this cacheable
+        json(&categories)
+    }
 }
 
 pub async fn genders_list<O: SafeStore>(environment: Environment<O>) -> RouteResult {
-    let genders = environment
-        .db
-        .retrieve_genders()
-        .await
-        .map_err(|e: BackendError| Rejection::new(Context::genders(), e))?;
+    timed! {
+        let genders = environment
+            .db
+            .retrieve_genders()
+            .await
+            .map_err(|e: BackendError| Rejection::new(Context::genders(), e))?;
 
-    // TODO make this cacheable
-    as_box!(json(&genders))
+        // TODO make this cacheable
+        json(&genders)
+    }
 }
 
 pub async fn count<O: SafeStore>(environment: Environment<O>) -> RouteResult {
-    let count = environment
-        .db
-        .count_all()
-        .await
-        .map_err(|e: BackendError| Rejection::new(Context::count(), e))?;
+    timed! {
+        let count = environment
+            .db
+            .count_all()
+            .await
+            .map_err(|e: BackendError| Rejection::new(Context::count(), e))?;
 
-    as_box!(json(&SuccessResponse::Count(count)))
+        json(&SuccessResponse::Count(count))
+    }
 }
 
 pub async fn upload<O: SafeStore + 'static>(
@@ -89,223 +111,224 @@ pub async fn upload<O: SafeStore + 'static>(
 ) -> RouteResult {
     use log::o;
 
-    let Environment {
-        logger,
-        db,
-        checker,
-        ..
-    } = environment.clone();
+    timed! {
+        let Environment {
+            logger,
+            db,
+            checker,
+            ..
+        } = environment.clone();
 
-    let error_handler = |e: BackendError| Rejection::new(Context::upload(None), e);
+        let error_handler = |e: BackendError| Rejection::new(Context::upload(None), e);
 
-    debug!(logger, "Parsing submission...");
-    let upload = parse_upload(content).await.map_err(error_handler)?;
+        debug!(logger, "Parsing submission...");
+        let upload = parse_upload(content).await.map_err(error_handler)?;
 
-    debug!(logger, "Parsing recording metadata...");
-    let metadata = parse_recording_metadata(logger.clone(), upload.metadata)
-        .await
-        .map_err(error_handler)?;
+        debug!(logger, "Parsing recording metadata...");
+        let metadata = parse_recording_metadata(logger.clone(), upload.metadata)
+            .await
+            .map_err(error_handler)?;
 
-    let token = metadata.token;
+        let token = metadata.token;
 
-    let logger = Arc::new(logger.new(o!("token" => format!("{}", token.clone()))));
+        let logger = Arc::new(logger.new(o!("token" => format!("{}", token.clone()))));
 
-    debug!(logger, "Locking token...");
-    let parent_id = lock_token(logger.clone(), db.clone(), token)
-        .await
-        .map_err(error_handler)?;
+        debug!(logger, "Locking token...");
+        let parent_id = lock_token(logger.clone(), db.clone(), token)
+            .await
+            .map_err(error_handler)?;
 
-    let logger = Arc::new(logger.new(o!("parent_id" => format!("{}", parent_id.clone()))));
+        let logger = Arc::new(logger.new(o!("parent_id" => format!("{}", parent_id.clone()))));
 
-    let error_handler = |e: BackendError| {
-        // first spawn a task to release the token, logging any
-        // errors, then go back to normal error handling
-        let logger = logger.clone();
-        let db = db.clone();
-        let token = token;
+        let error_handler = |e: BackendError| {
+            // first spawn a task to release the token, logging any
+            // errors, then go back to normal error handling
+            let logger = logger.clone();
+            let db = db.clone();
+            let token = token;
 
-        tokio::spawn(async move {
-            release_token(logger.clone(), db.clone(), token)
-                .await
-                .map_err(|e| {
-                    error!(logger, "Failed to release token: {}", e);
-                })
-        });
+            tokio::spawn(async move {
+                release_token(logger.clone(), db.clone(), token)
+                    .await
+                    .map_err(|e| {
+                        error!(logger, "Failed to release token: {}", e);
+                    })
+            });
 
-        error_handler(e)
-    };
+            error_handler(e)
+        };
 
-    debug!(logger, "Verifying audio contents...");
-    let (verified_audio, audio_format) = verify_audio(logger.clone(), checker, upload.audio)
-        .await
-        .map_err(&error_handler)?;
+        debug!(logger, "Verifying audio contents...");
+        let (verified_audio, audio_format) = verify_audio(logger.clone(), checker, upload.audio)
+            .await
+            .map_err(&error_handler)?;
 
-    // TODO retry in case ID already exists
-    debug!(logger, "Writing metadata to database...");
-    let email = metadata.email.clone(); // save for later
-    let id = save_recording_metadata(logger.clone(), db.clone(), &parent_id, metadata)
-        .await
-        .map_err(&error_handler)?;
-    let id_as_str = format!("{}", id);
-    let logger = Arc::new(logger.new(o!("id" => id_as_str.clone())));
+        // TODO retry in case ID already exists
+        debug!(logger, "Writing metadata to database...");
+        let email = metadata.email.clone(); // save for later
+        let id = save_recording_metadata(logger.clone(), db.clone(), &parent_id, metadata)
+            .await
+            .map_err(&error_handler)?;
+        let id_as_str = format!("{}", id);
+        let logger = Arc::new(logger.new(o!("id" => id_as_str.clone())));
 
-    let error_handler = |e: BackendError| {
-        // TODO delete row from DB
-        Rejection::new(Context::upload(Some(id_as_str.clone())), e)
-    };
+        let error_handler = |e: BackendError| {
+            // TODO delete row from DB
+            Rejection::new(Context::upload(Some(id_as_str.clone())), e)
+        };
 
-    // should this punt to a queue? is that necessary?
-    debug!(logger, "Saving recording to store...");
-    let mime_type = db
-        .retrieve_mime_type(&audio_format)
-        .await
-        .map_err(&error_handler)?;
+        // should this punt to a queue? is that necessary?
+        debug!(logger, "Saving recording to store...");
+        let mime_type = db
+            .retrieve_mime_type(&audio_format)
+            .await
+            .map_err(&error_handler)?;
 
-    match mime_type {
-        Some(mime_type) => complete_upload(
-            environment.clone(),
-            id,
-            token,
-            email,
-            mime_type,
-            verified_audio,
-            error_handler,
-        )
-        .await
-        .and_then(|r| as_box!(r)),
-        // why does this work but not directly returning `Err(error_handler(BackendError::...))`?
-        None => Err(BackendError::InvalidAudioFormat {
-            format: audio_format,
-        })
-        .map_err(&error_handler)?,
+        match mime_type {
+            Some(mime_type) => complete_upload(
+                environment.clone(),
+                id,
+                token,
+                email,
+                mime_type,
+                verified_audio,
+                error_handler,
+            )
+                .await?,
+            // why does this work but not directly returning `Err(error_handler(BackendError::...))`?
+            None => Err(BackendError::InvalidAudioFormat {
+                format: audio_format,
+            })
+                .map_err(&error_handler)?,
+        }
     }
 }
 
-pub async fn children<O: SafeStore>(
-    environment: Environment<O>,
-    parent: String,
-) -> RouteResult {
-    let error_handler = |e: BackendError| Rejection::new(Context::children(parent.clone()), e);
+pub async fn children<O: SafeStore>(environment: Environment<O>, parent: String) -> RouteResult {
+    timed! {
+        let error_handler = |e: BackendError| Rejection::new(Context::children(parent.clone()), e);
 
-    let id = Uuid::parse_str(&parent)
-        .map_err(|_| BackendError::InvalidId(parent.clone()))
-        .map_err(error_handler)?;
-    debug!(environment.logger, "Searching for children..."; "parent" => &parent.to_string());
+        let id = Uuid::parse_str(&parent)
+            .map_err(|_| BackendError::InvalidId(parent.clone()))
+            .map_err(error_handler)?;
+        debug!(environment.logger, "Searching for children..."; "parent" => &parent.to_string());
 
-    let children = environment.db.children(&id).await.map_err(error_handler)?;
-    let response = SuccessResponse::Children { parent, children };
+        let children = environment.db.children(&id).await.map_err(error_handler)?;
+        let response = SuccessResponse::Children { parent, children };
 
-    as_box!(with_status(json(&response), StatusCode::OK))
+        with_status(json(&response), StatusCode::OK)
+    }
 }
 
-pub async fn delete<O: SafeStore>(
-    environment: Environment<O>,
-    id: String,
-) -> RouteResult {
-    let error_handler = |e: BackendError| Rejection::new(Context::delete(id.clone()), e);
+pub async fn delete<O: SafeStore>(environment: Environment<O>, id: String) -> RouteResult {
+    timed! {
+        let error_handler = |e: BackendError| Rejection::new(Context::delete(id.clone()), e);
 
-    let id = Uuid::parse_str(&id)
-        .map_err(|_| BackendError::InvalidId(id.clone()))
-        .map_err(error_handler)?;
-    debug!(environment.logger, "Deleting recording..."; "id" => format!("{}", &id));
+        let id = Uuid::parse_str(&id)
+            .map_err(|_| BackendError::InvalidId(id.clone()))
+            .map_err(error_handler)?;
+        debug!(environment.logger, "Deleting recording..."; "id" => format!("{}", &id));
 
-    environment.store.delete(&id).await.map_err(error_handler)?;
-    environment
-        .db
-        .delete(&id)
-        .await
-        .map_err(|e| summarize_delete_errors(id, e))
-        .map_err(error_handler)?;
+        environment.store.delete(&id).await.map_err(error_handler)?;
+        environment
+            .db
+            .delete(&id)
+            .await
+            .map_err(|e| summarize_delete_errors(id, e))
+            .map_err(error_handler)?;
 
-    as_box!(StatusCode::NO_CONTENT)
+        StatusCode::NO_CONTENT
+    }
 }
 
-pub async fn retrieve<O: SafeStore>(
-    environment: Environment<O>,
-    id: String,
-) -> RouteResult {
+pub async fn retrieve<O: SafeStore>(environment: Environment<O>, id: String) -> RouteResult {
     use crate::recording::Recording;
 
-    let error_handler = |e: BackendError| Rejection::new(Context::retrieve(id.clone()), e);
+    timed! {
+        let error_handler = |e: BackendError| Rejection::new(Context::retrieve(id.clone()), e);
 
-    let id = Uuid::parse_str(&id)
-        .map_err(|_| BackendError::InvalidId(id.clone()))
-        .map_err(error_handler)?;
-    debug!(environment.logger, "Retrieving recording..."; "id" => format!("{}", &id));
+        let id = Uuid::parse_str(&id)
+            .map_err(|_| BackendError::InvalidId(id.clone()))
+            .map_err(error_handler)?;
+        debug!(environment.logger, "Retrieving recording..."; "id" => format!("{}", &id));
 
-    let option = environment.db.retrieve(&id).await.map_err(error_handler)?;
+        let option = environment.db.retrieve(&id).await.map_err(error_handler)?;
 
-    match option {
-        Some(recording) => {
-            let status = match recording {
-                Recording::Active(_) => StatusCode::OK,
-                Recording::Deleted(_) => StatusCode::GONE,
-            };
+        match option {
+            Some(recording) => {
+                let status = match recording {
+                    Recording::Active(_) => StatusCode::OK,
+                    Recording::Deleted(_) => StatusCode::GONE,
+                };
 
-            as_box!(with_status(json(&recording), status))
+                with_status(json(&recording), status)
+            }
+            None => with_status(json(&()), StatusCode::NOT_FOUND),
         }
-        None => as_box!(with_status(json(&()), StatusCode::NOT_FOUND)),
     }
 }
 
 pub async fn random<O: SafeStore>(environment: Environment<O>, count: u8) -> RouteResult {
-    let count = count as i16;
+    timed! {
+        let count = count as i16;
 
-    let error_handler = |e: BackendError| Rejection::new(Context::random(count), e);
+        let error_handler = |e: BackendError| Rejection::new(Context::random(count), e);
 
-    let recordings = environment
-        .db
-        .retrieve_random(count)
-        .await
-        .map_err(error_handler)?;
+        let recordings = environment
+            .db
+            .retrieve_random(count)
+            .await
+            .map_err(error_handler)?;
 
-    as_box!(json(&SuccessResponse::Random { recordings }))
-}
-
-pub async fn token<O: SafeStore>(environment: Environment<O>, id: Uuid) -> RouteResult {
-    let error_handler = |e: BackendError| Rejection::new(Context::token(id.to_string()), e);
-
-    let token = environment
-        .db
-        .retrieve_token(&id)
-        .await
-        .map_err(error_handler)?;
-
-    match token {
-        Some(token) => as_box!(with_status(
-            json(&SuccessResponse::Token {
-                id: token.id.to_string(),
-                parent_id: token.parent_id.to_string(),
-            }),
-            StatusCode::OK,
-        )),
-        _ => as_box!(with_status(json(&()), StatusCode::NOT_FOUND)),
+        json(&SuccessResponse::Random { recordings })
     }
 }
 
-pub async fn lookup<O: SafeStore>(
-    environment: Environment<O>,
-    key: String,
-) -> RouteResult {
-    let error_handler = |e: BackendError| Rejection::new(Context::lookup_key(key.clone()), e);
+pub async fn token<O: SafeStore>(environment: Environment<O>, id: Uuid) -> RouteResult {
+    timed! {
+        let error_handler = |e: BackendError| Rejection::new(Context::token(id.to_string()), e);
 
-    let key = Uuid::parse_str(&key)
-        .map_err(|_| BackendError::InvalidId(key.clone()))
-        .map_err(error_handler)?;
-    debug!(environment.logger, "Looking up key..."; "key" => format!("{}", key));
+        let token = environment
+            .db
+            .retrieve_token(&id)
+            .await
+            .map_err(error_handler)?;
 
-    let option = environment
-        .db
-        .lookup_key(&key)
-        .await
-        .map_err(error_handler)?;
+        match token {
+            Some(token) => with_status(
+                json(&SuccessResponse::Token {
+                    id: token.id.to_string(),
+                    parent_id: token.parent_id.to_string(),
+                }),
+                StatusCode::OK,
+            ),
+            _ => with_status(json(&()), StatusCode::NOT_FOUND),
+        }
+    }
+}
 
-    match option {
-        Some((id, tokens)) => as_box!(with_status(
-            json(&SuccessResponse::Lookup { id, tokens }),
-            StatusCode::OK,
-        )),
-        _ => as_box!(with_status(json(&()), StatusCode::NOT_FOUND)),
+pub async fn lookup<O: SafeStore>(environment: Environment<O>, key: String) -> RouteResult {
+    timed! {
+        let error_handler = |e: BackendError| Rejection::new(Context::lookup_key(key.clone()), e);
+
+        let key = Uuid::parse_str(&key)
+            .map_err(|_| BackendError::InvalidId(key.clone()))
+            .map_err(error_handler)?;
+        debug!(environment.logger, "Looking up key..."; "key" => format!("{}", key));
+
+        let option = environment
+            .db
+            .lookup_key(&key)
+            .await
+            .map_err(error_handler)?;
+
+        match option {
+            Some((id, tokens)) => with_status(
+                json(&SuccessResponse::Lookup { id, tokens }),
+                StatusCode::OK,
+            ),
+            _ => with_status(json(&()), StatusCode::NOT_FOUND),
+        }
     }
 }
 
@@ -313,18 +336,20 @@ pub async fn availability<O: SafeStore>(
     environment: Environment<O>,
     query: AvailabilityQuery,
 ) -> RouteResult {
-    let AvailabilityQuery { name } = query;
+    timed! {
+        let AvailabilityQuery { name } = query;
 
-    let available = environment
-        .db
-        .check_availability(&name)
-        .await
-        .map_err(|e| Rejection::new(Context::availability(name.clone()), e))?;
+        let available = environment
+            .db
+            .check_availability(&name)
+            .await
+            .map_err(|e| Rejection::new(Context::availability(name.clone()), e))?;
 
-    if available {
-        as_box!(StatusCode::OK)
-    } else {
-        as_box!(StatusCode::FORBIDDEN)
+        if available {
+            StatusCode::OK
+        } else {
+            StatusCode::FORBIDDEN
+        }
     }
 }
 
@@ -479,4 +504,8 @@ async fn create_tokens(
     }
 
     Ok(tokens)
+}
+
+fn format_server_timing(seconds: Duration) -> String {
+    format!("handler;dur={}", seconds.as_secs_f64() * 1000.0)
 }
