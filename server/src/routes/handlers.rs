@@ -23,7 +23,7 @@ use crate::{audio::format::AudioFormat, db::Db, environment, mime_type::MimeType
 
 macro_rules! as_box {
     ($expression:expr) => {
-        Box::new($expression) as Box<dyn Reply>
+        Ok(Box::new($expression) as Box<dyn Reply>)
     };
 }
 
@@ -37,7 +37,7 @@ pub async fn formats<O: Clone + Send + Sync>(environment: Environment<O>) -> Rou
         .map_err(|e: BackendError| Rejection::new(Context::formats(), e))?;
 
     // TODO make this cacheable
-    Ok(as_box!(json(&formats)))
+    as_box!(json(&formats))
 }
 
 pub async fn ages_list<O: Clone + Send + Sync>(environment: Environment<O>) -> RouteResult {
@@ -48,7 +48,7 @@ pub async fn ages_list<O: Clone + Send + Sync>(environment: Environment<O>) -> R
         .map_err(|e: BackendError| Rejection::new(Context::ages(), e))?;
 
     // TODO make this cacheable
-    Ok(as_box!(json(&ages)))
+    as_box!(json(&ages))
 }
 
 pub async fn categories_list<O: Clone + Send + Sync>(environment: Environment<O>) -> RouteResult {
@@ -59,7 +59,7 @@ pub async fn categories_list<O: Clone + Send + Sync>(environment: Environment<O>
         .map_err(|e: BackendError| Rejection::new(Context::categories(), e))?;
 
     // TODO make this cacheable
-    Ok(as_box!(json(&categories)))
+    as_box!(json(&categories))
 }
 
 pub async fn genders_list<O: Clone + Send + Sync>(environment: Environment<O>) -> RouteResult {
@@ -70,7 +70,7 @@ pub async fn genders_list<O: Clone + Send + Sync>(environment: Environment<O>) -
         .map_err(|e: BackendError| Rejection::new(Context::genders(), e))?;
 
     // TODO make this cacheable
-    Ok(as_box!(json(&genders)))
+    as_box!(json(&genders))
 }
 
 pub async fn count<O: Clone + Send + Sync>(environment: Environment<O>) -> RouteResult {
@@ -80,7 +80,7 @@ pub async fn count<O: Clone + Send + Sync>(environment: Environment<O>) -> Route
         .await
         .map_err(|e: BackendError| Rejection::new(Context::count(), e))?;
 
-    Ok(as_box!(json(&SuccessResponse::Count(count))))
+    as_box!(json(&SuccessResponse::Count(count)))
 }
 
 pub async fn upload<O: Clone + Send + Sync + 'static>(
@@ -172,7 +172,7 @@ pub async fn upload<O: Clone + Send + Sync + 'static>(
             error_handler,
         )
         .await
-        .map(|r| as_box!(r)),
+        .and_then(|r| as_box!(r)),
         // why does this work but not directly returning `Err(error_handler(BackendError::...))`?
         None => Err(BackendError::InvalidAudioFormat {
             format: audio_format,
@@ -195,7 +195,7 @@ pub async fn children<O: Clone + Send + Sync>(
     let children = environment.db.children(&id).await.map_err(error_handler)?;
     let response = SuccessResponse::Children { parent, children };
 
-    Ok(as_box!(with_status(json(&response), StatusCode::OK)))
+    as_box!(with_status(json(&response), StatusCode::OK))
 }
 
 pub async fn delete<O: Clone + Send + Sync>(
@@ -217,7 +217,7 @@ pub async fn delete<O: Clone + Send + Sync>(
         .map_err(|e| summarize_delete_errors(id, e))
         .map_err(error_handler)?;
 
-    Ok(as_box!(StatusCode::NO_CONTENT))
+    as_box!(StatusCode::NO_CONTENT)
 }
 
 pub async fn retrieve<O: Clone + Send + Sync>(
@@ -242,9 +242,9 @@ pub async fn retrieve<O: Clone + Send + Sync>(
                 Recording::Deleted(_) => StatusCode::GONE,
             };
 
-            Ok(as_box!(with_status(json(&recording), status)))
+            as_box!(with_status(json(&recording), status))
         }
-        None => Ok(as_box!(with_status(json(&()), StatusCode::NOT_FOUND))),
+        None => as_box!(with_status(json(&()), StatusCode::NOT_FOUND)),
     }
 }
 
@@ -259,7 +259,7 @@ pub async fn random<O: Clone + Send + Sync>(environment: Environment<O>, count: 
         .await
         .map_err(error_handler)?;
 
-    Ok(as_box!(json(&SuccessResponse::Random { recordings })))
+    as_box!(json(&SuccessResponse::Random { recordings }))
 }
 
 pub async fn token<O: Clone + Send + Sync>(environment: Environment<O>, id: Uuid) -> RouteResult {
@@ -272,14 +272,14 @@ pub async fn token<O: Clone + Send + Sync>(environment: Environment<O>, id: Uuid
         .map_err(error_handler)?;
 
     match token {
-        Some(token) => Ok(as_box!(with_status(
+        Some(token) => as_box!(with_status(
             json(&SuccessResponse::Token {
                 id: token.id.to_string(),
                 parent_id: token.parent_id.to_string(),
             }),
             StatusCode::OK,
-        ))),
-        _ => Ok(as_box!(with_status(json(&()), StatusCode::NOT_FOUND))),
+        )),
+        _ => as_box!(with_status(json(&()), StatusCode::NOT_FOUND)),
     }
 }
 
@@ -301,11 +301,11 @@ pub async fn lookup<O: Clone + Send + Sync>(
         .map_err(error_handler)?;
 
     match option {
-        Some((id, tokens)) => Ok(as_box!(with_status(
+        Some((id, tokens)) => as_box!(with_status(
             json(&SuccessResponse::Lookup { id, tokens }),
             StatusCode::OK,
-        ))),
-        _ => Ok(as_box!(with_status(json(&()), StatusCode::NOT_FOUND))),
+        )),
+        _ => as_box!(with_status(json(&()), StatusCode::NOT_FOUND)),
     }
 }
 
@@ -322,9 +322,9 @@ pub async fn availability<O: Clone + Send + Sync>(
         .map_err(|e| Rejection::new(Context::availability(name.clone()), e))?;
 
     if available {
-        Ok(as_box!(StatusCode::OK))
+        as_box!(StatusCode::OK)
     } else {
-        Ok(as_box!(StatusCode::FORBIDDEN))
+        as_box!(StatusCode::FORBIDDEN)
     }
 }
 
