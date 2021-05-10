@@ -8,7 +8,7 @@ pub struct Urls {
     base: Url,
 
     /// Path for all recordings-related actions.
-    pub(crate) recordings_path: String,
+    pub recordings_path: String,
 
     /// Prefix for all recordings-related actions.
     recordings_prefix: String,

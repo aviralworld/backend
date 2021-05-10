@@ -75,11 +75,8 @@ mod internal {
     macro_rules! route {
     ($name:ident => $handler:ident, $route_variable:ident; $($filters:expr),+) => (
         pub fn $name<O: SafeStore + 'static>(environment: Environment<O>) -> Route {
-            let r = environment.urls.recordings_path.clone();
-
             let $route_variable = warp::any()
-                .map(move || environment.clone())
-                .and(p(r));
+                .map(move || environment.clone());
 
             route_filter!($route_variable; $($filters),+);
 
