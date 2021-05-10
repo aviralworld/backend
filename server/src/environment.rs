@@ -10,6 +10,10 @@ use crate::{audio::format::AudioFormat, db::Db};
 pub type Checker = dyn Fn(&[u8]) -> Result<Vec<AudioFormat>, BackendError> + Send + Sync;
 pub type VecStore<O> = dyn Store<Output = O, Raw = Vec<u8>> + Send + Sync;
 
+pub trait SafeStore: Clone + Send + Sync {}
+
+impl<T: Clone + Send + Sync> SafeStore for T {}
+
 #[derive(Clone)]
 pub struct Environment<O: Clone + Send + Sync> {
     pub logger: Arc<Logger>,
@@ -20,7 +24,7 @@ pub struct Environment<O: Clone + Send + Sync> {
     pub config: Config,
 }
 
-impl<O: Clone + Send + Sync> Environment<O> {
+impl<O: SafeStore> Environment<O> {
     pub fn new(
         logger: Arc<Logger>,
         db: Arc<dyn Db + Send + Sync>,

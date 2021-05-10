@@ -127,6 +127,8 @@ fn start_main_server<O: Clone + Send + Sync + 'static>(
 
     let logger2 = logger.clone();
 
+    let prefix = warp::path(environment.urls.recordings_path.clone());
+
     let mut routes = vec![
         r::make_formats_route(environment.clone()),
         r::make_ages_list_route(environment.clone()),
@@ -151,7 +153,7 @@ fn start_main_server<O: Clone + Send + Sync + 'static>(
         .recover(move |r| routes::format_rejection(logger2.clone(), r));
 
     let (_, main_server) =
-        warp::serve(routes).bind_with_graceful_shutdown(([0, 0, 0, 0], port), async {
+        warp::serve(prefix.and(routes)).bind_with_graceful_shutdown(([0, 0, 0, 0], port), async {
             should_terminate.await;
         });
 

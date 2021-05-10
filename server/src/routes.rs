@@ -55,13 +55,12 @@ mod internal {
     use uuid::Uuid;
     use warp::filters::multipart::form;
     use warp::filters::BoxedFilter;
-    use warp::path::end;
     use warp::Filter;
     use warp::Reply;
-    use warp::{delete, get as g, path as p, path::param as par, post, query};
+    use warp::{delete, get as g, path as p, path::end, post, query};
 
     use super::{handlers, query as q, MAX_CONTENT_LENGTH};
-    use crate::environment::Environment;
+    use crate::environment::{Environment, SafeStore};
 
     type Route = BoxedFilter<(Box<dyn Reply>,)>;
 
@@ -75,12 +74,9 @@ mod internal {
 
     macro_rules! route {
     ($name:ident => $handler:ident, $route_variable:ident; $($filters:expr),+) => (
-        pub fn $name<O: Clone + Send + Sync + 'static>(environment: Environment<O>) -> Route {
-            let r = environment.urls.recordings_path.clone();
-
+        pub fn $name<O: SafeStore + 'static>(environment: Environment<O>) -> Route {
             let $route_variable = warp::any()
-                .map(move || environment.clone())
-                .and(p(r));
+                .map(move || environment.clone());
 
             route_filter!($route_variable; $($filters),+);
 
@@ -90,17 +86,17 @@ mod internal {
     );
 }
 
-    route!(make_formats_route => formats, rt; p("formats"), end(), g());
-    route!(make_ages_list_route => ages_list, rt; p("ages"), end(), g());
-    route!(make_categories_list_route => categories_list, rt; p("categories"), end(), g());
-    route!(make_genders_list_route => genders_list, rt; p("genders"), end(), g());
-    route!(make_count_route => count, rt; p("count"), end(), g());
+    route!(make_formats_route => formats, rt; p!("formats"), g());
+    route!(make_ages_list_route => ages_list, rt; p!("ages"), g());
+    route!(make_categories_list_route => categories_list, rt; p!("categories"), g());
+    route!(make_genders_list_route => genders_list, rt; p!("genders"), g());
+    route!(make_count_route => count, rt; p!("count"), g());
     route!(make_upload_route => upload, rt; end(), post(), form().max_length(MAX_CONTENT_LENGTH));
-    route!(make_children_route => children, rt; p!("id" / String / "children"), end(), g());
-    route!(make_delete_route => delete, rt; p("id"), par::<String>(), end(), delete());
-    route!(make_retrieve_route => retrieve, rt; p("id"), par::<String>(), end(), g());
-    route!(make_random_route => random, rt; p("random"), par::<u8>(), end(), g());
-    route!(make_token_route => token, rt; p("token"), par::<Uuid>(), end(), g());
-    route!(make_lookup_route => lookup, rt; p("lookup"), par::<String>(), end(), g());
-    route!(make_availability_route => availability, rt; p("available"), query::<q::AvailabilityQuery>(), end(), g());
+    route!(make_children_route => children, rt; p!("id" / String / "children"), g());
+    route!(make_delete_route => delete, rt; p!("id" / String), delete());
+    route!(make_retrieve_route => retrieve, rt; p!("id" / String), g());
+    route!(make_random_route => random, rt; p!("random" / u8), g());
+    route!(make_token_route => token, rt; p!("token" / Uuid), g());
+    route!(make_lookup_route => lookup, rt; p!("lookup"/ String), g());
+    route!(make_availability_route => availability, rt; p!("available" / ..), query::<q::AvailabilityQuery>(), end(), g());
 }

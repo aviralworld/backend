@@ -88,14 +88,14 @@ impl ActiveRecording {
     ) -> Self {
         ActiveRecording {
             id,
-            name,
-            times,
-            parent,
             url,
             mime_type,
+            times,
             category,
-            gender,
+            parent,
+            name,
             age,
+            gender,
             location,
             occupation,
         }
