@@ -22,16 +22,19 @@ FROM mwader/static-ffmpeg:$FFMPEG_VERSION AS ffmpeg
 
 FROM scratch
 
-USER 1000
+# We can’t switch to an unprivileged user (e.g. UID 1000) because the
+# temporary directory cannot be created when this image is run as a
+# service to test the frontend. GitLab CI would have to support
+# setting up services that use volumes with specific permissions.
 
 ARG TIMESTAMP
 ARG REVISION
 LABEL timestamp=$TIMESTAMP revision=$REVISION
 
-COPY --chown=1000:1000 --from=ffmpeg /ffprobe /bin/ffprobe
-COPY --chown=1000:1000 --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=ffmpeg /ffprobe /bin/ffprobe
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=builder /home/rust/src/backend/target/x86_64-unknown-linux-musl/release/backend /usr/app/backend
 ENV BACKEND_FFPROBE_PATH=/bin/ffprobe
 ENV SSL_CERT_DIR=/etc/ssl/certs/
-COPY --chown=1000:1000 --from=builder /home/rust/src/backend/target/x86_64-unknown-linux-musl/release/backend /usr/app/backend
 ENV TMPDIR /usr/app/tmp
 CMD ["/usr/app/backend"]
