@@ -60,7 +60,7 @@ mod internal {
     use warp::{delete, get as g, path as p, path::end, post, query};
 
     use super::{handlers, query as q, MAX_CONTENT_LENGTH};
-    use crate::environment::Environment;
+    use crate::environment::{Environment, SafeStore};
 
     type Route = BoxedFilter<(Box<dyn Reply>,)>;
 
@@ -74,7 +74,7 @@ mod internal {
 
     macro_rules! route {
     ($name:ident => $handler:ident, $route_variable:ident; $($filters:expr),+) => (
-        pub fn $name<O: Clone + Send + Sync + 'static>(environment: Environment<O>) -> Route {
+        pub fn $name<O: SafeStore + 'static>(environment: Environment<O>) -> Route {
             let r = environment.urls.recordings_path.clone();
 
             let $route_variable = warp::any()

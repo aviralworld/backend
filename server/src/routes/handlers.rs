@@ -10,7 +10,7 @@ use warp::{
     reply::{json, with_header, with_status, Json, Reply, WithHeader, WithStatus},
 };
 
-use crate::environment::Environment;
+use crate::environment::{Environment, SafeStore};
 use crate::errors::{summarize_delete_errors, BackendError};
 use crate::io::parse_upload;
 use crate::recording::UploadMetadata;
@@ -29,7 +29,7 @@ macro_rules! as_box {
 
 type RouteResult = Result<Box<dyn Reply>, reject::Rejection>;
 
-pub async fn formats<O: Clone + Send + Sync>(environment: Environment<O>) -> RouteResult {
+pub async fn formats<O: SafeStore>(environment: Environment<O>) -> RouteResult {
     let formats = environment
         .db
         .retrieve_format_essences()
@@ -40,7 +40,7 @@ pub async fn formats<O: Clone + Send + Sync>(environment: Environment<O>) -> Rou
     as_box!(json(&formats))
 }
 
-pub async fn ages_list<O: Clone + Send + Sync>(environment: Environment<O>) -> RouteResult {
+pub async fn ages_list<O: SafeStore>(environment: Environment<O>) -> RouteResult {
     let ages = environment
         .db
         .retrieve_ages()
@@ -51,7 +51,7 @@ pub async fn ages_list<O: Clone + Send + Sync>(environment: Environment<O>) -> R
     as_box!(json(&ages))
 }
 
-pub async fn categories_list<O: Clone + Send + Sync>(environment: Environment<O>) -> RouteResult {
+pub async fn categories_list<O: SafeStore>(environment: Environment<O>) -> RouteResult {
     let categories = environment
         .db
         .retrieve_categories()
@@ -62,7 +62,7 @@ pub async fn categories_list<O: Clone + Send + Sync>(environment: Environment<O>
     as_box!(json(&categories))
 }
 
-pub async fn genders_list<O: Clone + Send + Sync>(environment: Environment<O>) -> RouteResult {
+pub async fn genders_list<O: SafeStore>(environment: Environment<O>) -> RouteResult {
     let genders = environment
         .db
         .retrieve_genders()
@@ -73,7 +73,7 @@ pub async fn genders_list<O: Clone + Send + Sync>(environment: Environment<O>) -
     as_box!(json(&genders))
 }
 
-pub async fn count<O: Clone + Send + Sync>(environment: Environment<O>) -> RouteResult {
+pub async fn count<O: SafeStore>(environment: Environment<O>) -> RouteResult {
     let count = environment
         .db
         .count_all()
@@ -83,7 +83,7 @@ pub async fn count<O: Clone + Send + Sync>(environment: Environment<O>) -> Route
     as_box!(json(&SuccessResponse::Count(count)))
 }
 
-pub async fn upload<O: Clone + Send + Sync + 'static>(
+pub async fn upload<O: SafeStore + 'static>(
     environment: Environment<O>,
     content: FormData,
 ) -> RouteResult {
@@ -181,7 +181,7 @@ pub async fn upload<O: Clone + Send + Sync + 'static>(
     }
 }
 
-pub async fn children<O: Clone + Send + Sync>(
+pub async fn children<O: SafeStore>(
     environment: Environment<O>,
     parent: String,
 ) -> RouteResult {
@@ -198,7 +198,7 @@ pub async fn children<O: Clone + Send + Sync>(
     as_box!(with_status(json(&response), StatusCode::OK))
 }
 
-pub async fn delete<O: Clone + Send + Sync>(
+pub async fn delete<O: SafeStore>(
     environment: Environment<O>,
     id: String,
 ) -> RouteResult {
@@ -220,7 +220,7 @@ pub async fn delete<O: Clone + Send + Sync>(
     as_box!(StatusCode::NO_CONTENT)
 }
 
-pub async fn retrieve<O: Clone + Send + Sync>(
+pub async fn retrieve<O: SafeStore>(
     environment: Environment<O>,
     id: String,
 ) -> RouteResult {
@@ -248,7 +248,7 @@ pub async fn retrieve<O: Clone + Send + Sync>(
     }
 }
 
-pub async fn random<O: Clone + Send + Sync>(environment: Environment<O>, count: u8) -> RouteResult {
+pub async fn random<O: SafeStore>(environment: Environment<O>, count: u8) -> RouteResult {
     let count = count as i16;
 
     let error_handler = |e: BackendError| Rejection::new(Context::random(count), e);
@@ -262,7 +262,7 @@ pub async fn random<O: Clone + Send + Sync>(environment: Environment<O>, count: 
     as_box!(json(&SuccessResponse::Random { recordings }))
 }
 
-pub async fn token<O: Clone + Send + Sync>(environment: Environment<O>, id: Uuid) -> RouteResult {
+pub async fn token<O: SafeStore>(environment: Environment<O>, id: Uuid) -> RouteResult {
     let error_handler = |e: BackendError| Rejection::new(Context::token(id.to_string()), e);
 
     let token = environment
@@ -283,7 +283,7 @@ pub async fn token<O: Clone + Send + Sync>(environment: Environment<O>, id: Uuid
     }
 }
 
-pub async fn lookup<O: Clone + Send + Sync>(
+pub async fn lookup<O: SafeStore>(
     environment: Environment<O>,
     key: String,
 ) -> RouteResult {
@@ -309,7 +309,7 @@ pub async fn lookup<O: Clone + Send + Sync>(
     }
 }
 
-pub async fn availability<O: Clone + Send + Sync>(
+pub async fn availability<O: SafeStore>(
     environment: Environment<O>,
     query: AvailabilityQuery,
 ) -> RouteResult {
@@ -394,7 +394,7 @@ async fn save_recording_metadata(
     Ok(*id)
 }
 
-async fn complete_upload<O: Clone + Send + Sync + 'static>(
+async fn complete_upload<O: SafeStore + 'static>(
     environment: Environment<O>,
     id: Uuid,
     token: Uuid,
