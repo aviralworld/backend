@@ -8,7 +8,7 @@ use warp::{
     filters::multipart::{FormData, Part},
     http::StatusCode,
     reject,
-    reply::{json, with_header, with_status, Json, Reply, WithHeader, WithStatus},
+    reply::{json, with_header, with_status, Reply},
 };
 
 use crate::environment::{Environment, SafeStore};
@@ -179,13 +179,16 @@ pub async fn upload<O: SafeStore + 'static>(
 
         // should this punt to a queue? is that necessary?
         debug!(logger, "Saving recording to store...");
+
         let mime_type = db
             .retrieve_mime_type(&audio_format)
             .await
-            .map_err(&error_handler)?;
+            .map_err(&error_handler)?
+            .ok_or_else(|| error_handler(BackendError::InvalidAudioFormat {
+                format: audio_format,
+            }))?;
 
-        match mime_type {
-            Some(mime_type) => complete_upload(
+        complete_upload(
                 environment.clone(),
                 id,
                 token,
@@ -194,13 +197,7 @@ pub async fn upload<O: SafeStore + 'static>(
                 verified_audio,
                 error_handler,
             )
-                .await?,
-            // why does this work but not directly returning `Err(error_handler(BackendError::...))`?
-            None => Err(BackendError::InvalidAudioFormat {
-                format: audio_format,
-            })
-                .map_err(&error_handler)?,
-        }
+                .await?
     }
 }
 
@@ -427,7 +424,7 @@ async fn complete_upload<O: SafeStore + 'static>(
     mime_type: MimeType,
     verified_audio: Vec<u8>,
     error_handler: impl Fn(BackendError) -> Rejection,
-) -> Result<WithHeader<WithStatus<Json>>, reject::Rejection> {
+) -> Result<Box<dyn Reply>, reject::Rejection> {
     let logger = environment.logger.clone();
     let db = environment.db.clone();
     let store = environment.store.clone();
@@ -466,11 +463,11 @@ async fn complete_upload<O: SafeStore + 'static>(
         key: Some(key),
     };
 
-    Ok(with_header(
+    Ok(Box::new(with_header(
         with_status(json(&response), StatusCode::CREATED),
         "location",
         environment.urls.recording(&id).as_str(),
-    ))
+    )) as Box<dyn Reply>)
 }
 
 async fn update_recording_url<O>(
