@@ -3,6 +3,7 @@ name = "log"
 version = "0.1.0"
 authors = ["Shiv Jha-Mathur <4199779-shivjm@users.noreply.gitlab.com>"]
 edition = "2018"
+private = true
 
 [dependencies]
 lazy_static = { version = "1.4.0", optional = true }
