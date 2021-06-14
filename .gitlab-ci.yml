@@ -2,7 +2,7 @@ variables:
   CARGO_INCREMENTAL: 0
   FFMPEG_VERSION: 4.3.1
   POSTGRES_VERSION: 12
-  RUST_VERSION: 1.51.0
+  RUST_VERSION: 1.52.1
   KANIKO_AUTH_CONFIG: >-
       {
         "auths": {
@@ -101,6 +101,8 @@ test:
   only:
     - merge_requests
   interruptible: yes
+  tags:
+    - high-cpu
 
 docker-base:
   stage: docker-base
@@ -116,6 +118,8 @@ docker-base:
     - export tag="v$build_timestamp"
     - echo $tag > .gitlab-ci-timestamp
     - /kaniko/executor --context $CI_PROJECT_DIR --dockerfile $CI_PROJECT_DIR/Dockerfile.base --cache=true --destination=$CI_REGISTRY_IMAGE/base:$tag --destination=$CI_REGISTRY_IMAGE/base:latest --build-arg RUST_VERSION=$RUST_VERSION --build-arg REVISION=$CI_COMMIT_SHA --build-arg TIMESTAMP=$build_timestamp
+  tags:
+    - high-cpu
   only:
     - master
 
@@ -132,6 +136,8 @@ docker:
     - export tag=`echo $(cat .gitlab-ci-timestamp)`
     - /kaniko/executor --context $CI_PROJECT_DIR --dockerfile $CI_PROJECT_DIR/Dockerfile --cache=true --destination=$CI_REGISTRY_IMAGE:$tag --destination=$CI_REGISTRY_IMAGE:latest --build-arg BASE_IMAGE=$CI_REGISTRY_IMAGE/base:$tag --build-arg FFMPEG_VERSION=$FFMPEG_VERSION --build-arg REVISION=$CI_COMMIT_SHA --build-arg TIMESTAMP=$build_timestamp
     - echo $tag
+  tags:
+    - high-cpu
   only:
     - master
   interruptible: yes
